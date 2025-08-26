@@ -175,5 +175,4 @@ Hey Nova is not a toy chatbot. It’s a **personal AI butler** that:
 * Grows with you: from MacBook MVP → full cross-platform J.A.R.V.I.S.
 
 ---
-
-👉 Would you like me to make this into a **ready-to-use `README.md` file** (with badges, sections, and markdown formatting) so you can drop it straight into your repo?
+## Mouhamed Mbengue 2025
