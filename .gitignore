@@ -136,3 +136,6 @@ dmypy.json
 nova_config.json
 nova_cache/
 nova_logs/
+core/personal_config.py
+personal_config.py
+PERSONALIZATION.md

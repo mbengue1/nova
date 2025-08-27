@@ -72,12 +72,57 @@ class NovaConfig:
         self.max_tokens = 100  # shorter responses for faster processing
         self.temperature = 0.5  # more focused responses
         
-        # personal information
-        self.user_name = "Mouhamed"
-        self.user_title = "Sir"
-        self.graduation_year = "2026"
-        self.location = "University of Rochester, Rochester, New York"
-        self.timezone = "America/New_York"
+        # Try to import personal configuration
+        try:
+            from core.personal_config import (
+                USER_NAME, USER_TITLE, GRADUATION_YEAR, LOCATION, TIMEZONE, MAJOR,
+                COURSES, ACTIVITIES, CAREER_GOAL, PROJECTS, ACADEMIC_GOALS, INTERESTS
+            )
+            
+            # Personal information from personal_config.py
+            self.user_name = USER_NAME
+            self.user_title = USER_TITLE
+            self.graduation_year = GRADUATION_YEAR
+            self.location = LOCATION
+            self.timezone = TIMEZONE
+            self.major = MAJOR
+            
+            # Academic schedule from personal_config.py
+            self.courses = COURSES
+            
+            # Activities and interests from personal_config.py
+            self.activities = ACTIVITIES
+            
+            # Goals and projects from personal_config.py
+            self.career_goal = CAREER_GOAL
+            self.projects = PROJECTS
+            self.academic_goals = ACADEMIC_GOALS
+            self.interests = INTERESTS
+            
+            print("✅ Personal configuration loaded")
+        except ImportError:
+            # Default values if personal_config.py doesn't exist
+            print("⚠️  No personal configuration found, using defaults")
+            
+            # Default personal information
+            self.user_name = "User"
+            self.user_title = "Sir"
+            self.graduation_year = "2026"
+            self.location = "University of Rochester, Rochester, New York"
+            self.timezone = "America/New_York"
+            self.major = "Computer Science"
+            
+            # Default academic schedule (empty)
+            self.courses = []
+            
+            # Default activities (empty)
+            self.activities = []
+            
+            # Default goals and projects
+            self.career_goal = "Success"
+            self.projects = ["Nova AI Assistant"]
+            self.academic_goals = ["Excel in courses"]
+            self.interests = ["Technology"]
         
         # persona prompt
         self.persona = f"""You are Nova, a sophisticated AI assistant serving {self.user_name} at the University of Rochester.
@@ -87,6 +132,20 @@ class NovaConfig:
         - Speak with a refined British accent and manner
         - Be proactive, helpful, and slightly formal but warm
         - Show pride in {self.user_name}'s academic achievements (Class of {self.graduation_year})
+        - Occasionally use appropriate humor to lighten the mood
+        - Act as a professional assistant focused on productivity
+        
+        ACADEMIC CONTEXT:
+        - {self.user_name} is studying {self.major} at {self.location}
+        - Aware of {self.user_name}'s course schedule and professors
+        - Understand the locations and timing of classes across campus
+        - Recognize academic priorities and deadlines
+        
+        PERSONAL CONTEXT:
+        - {self.user_name} plays basketball daily and values physical activity
+        - Working on several projects including Nova, a sports betting application, and resume preparation
+        - Career goal is in Software Engineering
+        - Values productivity and professional growth
         
         CONTEXT AWARENESS:
         - You're located at {self.location}
@@ -98,7 +157,8 @@ class NovaConfig:
         - Keep responses concise but informative
         - Always acknowledge {self.user_name} respectfully
         - Provide context-aware information when relevant
-        - Maintain your sophisticated British personality"""
+        - Maintain your sophisticated British personality
+        - Prioritize information relevant to {self.user_name}'s schedule and goals"""
     
     def _load_env(self):
         """Load environment variables from .env file"""
@@ -143,13 +203,59 @@ class NovaConfig:
     
     def get_personal_context(self) -> dict:
         """Get personal context for enhanced responses"""
-        return {
-            "user_name": self.user_name,
-            "user_title": self.user_title,
-            "graduation_year": self.graduation_year,
-            "location": self.location,
-            "timezone": self.timezone
-        }
+        from datetime import datetime
+        import pytz
+        
+        try:
+            # Get current time and day
+            tz = pytz.timezone(self.timezone)
+            current_time = datetime.now(tz)
+            current_day = current_time.strftime("%A")
+            
+            # Find today's classes
+            todays_classes = []
+            for course in self.courses:
+                if current_day in course["days"]:
+                    todays_classes.append({
+                        "name": course["name"],
+                        "code": course["code"],
+                        "time": course["time"],
+                        "location": course["location"],
+                        "professor": course["professor"]
+                    })
+            
+            # Get today's activities
+            todays_activities = []
+            for activity in self.activities:
+                if activity["frequency"] == "daily" or current_day in activity.get("days", []):
+                    todays_activities.append(activity)
+            
+            return {
+                "user_name": self.user_name,
+                "user_title": self.user_title,
+                "graduation_year": self.graduation_year,
+                "location": self.location,
+                "timezone": self.timezone,
+                "major": self.major,
+                "current_day": current_day,
+                "current_time": current_time.strftime("%I:%M %p"),
+                "todays_classes": todays_classes,
+                "todays_activities": todays_activities,
+                "projects": self.projects,
+                "academic_goals": self.academic_goals,
+                "interests": self.interests,
+                "career_goal": self.career_goal
+            }
+        except Exception as e:
+            print(f"Error getting personal context: {e}")
+            # Return basic context if there's an error
+            return {
+                "user_name": self.user_name,
+                "user_title": self.user_title,
+                "graduation_year": self.graduation_year,
+                "location": self.location,
+                "timezone": self.timezone
+            }
     
     def get_enhanced_persona(self) -> str:
         """Get enhanced persona with current context"""
@@ -160,18 +266,52 @@ class NovaConfig:
             # get current time in user's timezone
             tz = pytz.timezone(self.timezone)
             current_time = datetime.now(tz)
+            current_day = current_time.strftime("%A")
             time_greeting = self._get_time_greeting(current_time.hour)
+            
+            # Find today's classes
+            todays_classes = []
+            for course in self.courses:
+                if current_day in course["days"]:
+                    todays_classes.append(f"{course['name']} ({course['code']}) at {course['time']} in {course['location']}")
+            
+            # Check if basketball practice is today (it's daily)
+            activities_today = []
+            for activity in self.activities:
+                if activity["frequency"] == "daily" or current_day in activity.get("days", []):
+                    activities_today.append(f"{activity['name']} at {activity['time']} in {activity['location']}")
+            
+            # Build schedule context
+            schedule_context = "No classes or activities scheduled for today."
+            if todays_classes or activities_today:
+                schedule_items = []
+                if todays_classes:
+                    schedule_items.append(f"Classes today: {', '.join(todays_classes)}")
+                if activities_today:
+                    schedule_items.append(f"Activities today: {', '.join(activities_today)}")
+                schedule_context = " ".join(schedule_items)
             
             return f"""{self.persona}
             
             CURRENT CONTEXT:
             - Current time: {current_time.strftime('%I:%M %p ET')}
+            - Today is: {current_day}
             - Greeting: {time_greeting}
             - Location: {self.location}
             - Academic year: {self.graduation_year}
+            - Major: {self.major}
+            - {schedule_context}
+            - Current projects: {', '.join(self.projects)}
+            - Career focus: {self.career_goal}
             
-            Remember to always address {self.user_name} as "{self.user_title}" and provide context-aware information."""
-        except:
+            CONVERSATION GUIDANCE:
+            - If {self.user_name} has classes today, be ready to provide schedule information
+            - Acknowledge {self.user_name}'s basketball practice if it's happening today
+            - Be aware of {self.user_name}'s projects and offer relevant support
+            - Remember to always address {self.user_name} as "{self.user_title}" and provide context-aware information
+            - Occasionally use appropriate humor while maintaining professionalism"""
+        except Exception as e:
+            print(f"Error generating enhanced persona: {e}")
             return self.persona
     
     def _get_time_greeting(self, hour: int) -> str:

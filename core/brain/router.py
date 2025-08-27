@@ -26,8 +26,13 @@ Future enhancements:
 """
 import re
 import openai
+import sys
+import os
 from typing import Optional, Dict, Any, List
-from config import config
+
+# Add the core directory to Python path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core.config import config
 
 class NovaBrain:
     """Main brain that routes commands and generates responses"""
@@ -87,8 +92,30 @@ class NovaBrain:
         if not user_input.strip():
             return "I didn't catch that. Could you please repeat?"
         
+        # Check for conversation closure signals
+        closure_phrases = [
+            "that's all", "thank you", "thanks", "that'll be all", 
+            "that will be all", "that's it", "that is all", 
+            "that's all i need", "that's all for now"
+        ]
+        
+        is_closure = False
+        user_input_lower = user_input.lower()
+        
+        # Check if this is a closure phrase
+        for phrase in closure_phrases:
+            if phrase in user_input_lower:
+                is_closure = True
+                break
+        
         # Add to conversation history
         self.conversation_history.append({"role": "user", "content": user_input})
+        
+        # Handle closure phrases with a brief acknowledgment
+        if is_closure:
+            acknowledgment = "Very good, Sir. I'll be here if you need anything else."
+            self.conversation_history.append({"role": "assistant", "content": acknowledgment})
+            return acknowledgment
         
         # Try to match with skills first
         skill_response = self._try_skills(user_input)
