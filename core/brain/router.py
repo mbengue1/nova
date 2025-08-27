@@ -62,7 +62,10 @@ class NovaBrain:
         self.skill_patterns = {
             'app_control': [
                 r'\b(open|launch|start)\s+(vscode|code|visual\s+studio|chrome|safari|firefox|terminal|finder|mail|messages|slack|discord|spotify|music|calculator|notes|reminders|calendar|photos|preview|textedit|pages|numbers|keynote)\b',
-                r'\b(open|launch|start)\s+(visual\s+studio\s+code|vs\s+code)\b'
+                r'\b(open|launch|start)\s+(visual\s+studio\s+code|vs\s+code)\b',
+                r'\b(can\s+you\s+open|could\s+you\s+open|please\s+open|would\s+you\s+open)\s+(vscode|code|visual\s+studio|chrome|safari|firefox|terminal|finder|mail|messages|slack|discord|spotify|music|calculator|notes|reminders|calendar|photos|preview|textedit|pages|numbers|keynote)\b',
+                r'\b(can\s+you\s+launch|could\s+you\s+launch|please\s+launch|would\s+you\s+launch)\s+(vscode|code|visual\s+studio|chrome|safari|firefox|terminal|finder|mail|messages|slack|discord|spotify|music|calculator|notes|reminders|calendar|photos|preview|textedit|pages|numbers|keynote)\b',
+                r'\b(can\s+you\s+start|could\s+you\s+start|please\s+start|would\s+you\s+start)\s+(vscode|code|visual\s+studio|chrome|safari|firefox|terminal|finder|mail|messages|slack|discord|spotify|music|calculator|notes|reminders|calendar|photos|preview|textedit|pages|numbers|keynote)\b'
             ],
             'system_info': [
                 r'\b(time|date|current\s+time|what\s+time|what\s+date|battery|volume|brightness|wifi|network|status)\b',
@@ -92,7 +95,7 @@ class NovaBrain:
         if not user_input.strip():
             return "I didn't catch that. Could you please repeat?"
         
-        # Check for conversation closure signals
+        # 1. Check for conversation closure signals (e.g., "thanks", "that's all")
         closure_phrases = [
             "that's all", "thank you", "thanks", "that'll be all", 
             "that will be all", "that's it", "that is all", 
@@ -102,22 +105,38 @@ class NovaBrain:
         is_closure = False
         user_input_lower = user_input.lower()
         
-        # Check if this is a closure phrase
+        # Detect if this is a conversation closure phrase
         for phrase in closure_phrases:
             if phrase in user_input_lower:
                 is_closure = True
                 break
         
-        # Add to conversation history
+        # Add user input to conversation history
         self.conversation_history.append({"role": "user", "content": user_input})
         
-        # Handle closure phrases with a brief acknowledgment
+        # 2. Handle conversation closure with a polite acknowledgment
         if is_closure:
             acknowledgment = "Very good, Sir. I'll be here if you need anything else."
             self.conversation_history.append({"role": "assistant", "content": acknowledgment})
             return acknowledgment
         
-        # Try to match with skills first
+        # 3. Prioritize app control commands (e.g., "open Chrome")
+        # This ensures Nova can actually control apps even in conversational context
+        app_control_match = False
+        
+        # Check if this is an app control command using regex patterns
+        for pattern in self.skill_patterns['app_control']:
+            if re.search(pattern, user_input_lower):
+                app_control_match = True
+                break
+        
+        # Execute app control commands directly
+        if app_control_match:
+            skill_response = self._handle_app_control(user_input)
+            self.conversation_history.append({"role": "assistant", "content": skill_response})
+            return skill_response
+        
+        # For other skills, use the normal detection
         skill_response = self._try_skills(user_input)
         if skill_response:
             # Add skill response to history
@@ -142,10 +161,26 @@ class NovaBrain:
         return fallback
     
     def _try_skills(self, user_input: str) -> Optional[str]:
-        """Try to match user input with available skills"""
+        """Try to match user input with available skills
+        
+        This method checks if the user's input matches any of the defined skill patterns
+        and executes the corresponding skill if a match is found.
+        
+        Note: App control skills are handled separately for better prioritization.
+        
+        Args:
+            user_input: The user's input text
+            
+        Returns:
+            Optional[str]: The skill response if a match is found, None otherwise
+        """
         user_input_lower = user_input.lower()
         
         for skill_name, patterns in self.skill_patterns.items():
+            # Skip app_control as it's handled separately in process_input
+            if skill_name == 'app_control':
+                continue
+                
             for pattern in patterns:
                 if re.search(pattern, user_input_lower):
                     return self._execute_skill(skill_name, user_input)
@@ -174,7 +209,18 @@ class NovaBrain:
             return f"Sorry, I encountered an error while trying to {skill_name}: {str(e)}"
     
     def _handle_app_control(self, user_input: str) -> str:
-        """Handle app launching commands"""
+        """Handle app launching commands
+        
+        This method processes commands to open applications on macOS.
+        It maps common app names to their actual application names and
+        uses the 'open' command to launch them.
+        
+        Args:
+            user_input: The user's request to open an application
+            
+        Returns:
+            str: A confirmation message or error message
+        """
         import subprocess
         
         # Extract app name from input
@@ -363,9 +409,23 @@ class NovaBrain:
             return None
             
     def _stream_llm_response(self, client, messages):
-        """Stream response chunks from the LLM
+        """Stream response chunks from the LLM in real-time
         
-        Returns a generator that yields response chunks as they arrive
+        This method enables streaming responses from the OpenAI API,
+        which provides a more natural conversational experience by
+        displaying responses as they are generated rather than waiting
+        for the complete response.
+        
+        Args:
+            client: The OpenAI client instance
+            messages: The conversation history and system messages
+            
+        Returns:
+            Generator: A generator that yields response chunks as they arrive
+            
+        Note:
+            The full response is collected and added to conversation history
+            after streaming is complete.
         """
         try:
             # Create a streaming response
