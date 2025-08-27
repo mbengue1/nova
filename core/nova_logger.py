@@ -40,9 +40,18 @@ class NovaLogger:
             "data": data
         }
         
-        # print to console with formatting
-        ts_str = f"[{log_entry['timestamp']:.3f}s]"
-        print(f"{ts_str} {level}: {event} - {json.dumps(data, default=str)}")
+        # Filter out verbose logs
+        verbose_events = [
+            "vad_frame_processed", "vad_silence_detected", "vad_speech_detected",
+            "audio_callback_entry", "audio_callback_active", "vad_recording_progress",
+            "pre_callback_stream_state", "vad_audio_device_test", "vad_simple_audio_test",
+            "vad_simple_audio_test_result", "audio_config_separation", "utterance_buffer_check"
+        ]
+        
+        # Only print important logs
+        if event not in verbose_events:
+            ts_str = f"[{log_entry['timestamp']:.3f}s]"
+            print(f"{ts_str} {level}: {event} - {json.dumps(data, default=str)}")
         
         # TODO: Add file logging if needed
         return log_entry

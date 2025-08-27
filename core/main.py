@@ -56,6 +56,9 @@ class HeyNova:
         self.is_running = False
         self.current_mode = "wake_word"  # or "push_to_talk"
         
+        # Configure logging verbosity
+        self.verbose_logging = False  # Set to True for detailed logs
+        
         # setup system signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -68,6 +71,7 @@ class HeyNova:
         print("🎧 Audio config (global): sr=16000, dtype=int16, ch=1")
         print("🔔 Wakeword: frame=512 samples (Porcupine)")
         print("🧠 VAD/STT:  frame=480 samples (30 ms @ 16 kHz)")
+        print("📝 Verbose logging: " + ("Enabled" if self.verbose_logging else "Disabled"))
         
         # validate system configuration
         config.validate_config()
@@ -80,7 +84,6 @@ class HeyNova:
             self.wake_detector.start_listening()
             self.current_mode = "wake_word"
             print("🎧 Listening for 'Hey Nova'...")
-            print("   (Press Ctrl+C to exit)")
         except Exception as e:
             print(f"⚠️  Wake word detection failed: {e}")
             print("🔄 Falling back to push-to-talk mode...")
@@ -91,6 +94,8 @@ class HeyNova:
         
         # main system loop
         try:
+            print("\n🔊 Nova is ready and listening...")
+            print("   (Press Ctrl+C to exit)")
             while self.is_running:
                 time.sleep(0.1)
         except KeyboardInterrupt:

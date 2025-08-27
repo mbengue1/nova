@@ -13,6 +13,17 @@ openai>=1.0.0
 # Timezone and utilities
 pytz>=2023.3
 
+# HTTP requests for APIs
+requests>=2.31.0
+
+# Notion API integration
+notion-client>=2.0.0
+
+# Google Calendar API integration
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.1.0
+google-auth-oauthlib>=1.0.0
+
 # Voice Activity Detection for natural conversations
 webrtcvad>=2.0.10
 
