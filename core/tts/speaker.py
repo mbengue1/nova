@@ -13,6 +13,8 @@ class SpeechSynthesizer:
     def __init__(self):
         self.system = platform.system()
         self.available_voices = self._get_available_voices()
+        self.is_speaking = False
+        self.current_speech_process = None
         
         # attempt to initialize azure tts for high quality speech
         self.azure_tts = None
@@ -85,6 +87,28 @@ class SpeechSynthesizer:
             print(f"TTS not supported on {self.system}")
             return False
     
+    def stop_speaking(self):
+        """Stop current speech immediately"""
+        self.is_speaking = False
+        
+        # stop azure tts if speaking
+        if self.azure_tts and self.azure_tts.get_speaking_status():
+            self.azure_tts.stop_speaking()
+        
+        # stop macos speech if speaking
+        if self.current_speech_process:
+            try:
+                self.current_speech_process.terminate()
+                self.current_speech_process = None
+            except:
+                pass
+        
+        print("🔇 Speech stopped")
+    
+    def is_currently_speaking(self) -> bool:
+        """Check if currently speaking"""
+        return self.is_speaking
+    
     def _speak_macos(self, text: str, voice: str, rate: float, pitch: float) -> bool:
         """Speak text using macOS 'say' command"""
         try:
@@ -104,38 +128,25 @@ class SpeechSynthesizer:
             # add text to speak
             cmd.append(text)
             
-            # execute the say command
+            # execute the say command asynchronously
             print(f"🗣️  Speaking: '{text}'")
-            result = subprocess.run(cmd, timeout=30)
+            self.is_speaking = True
+            self.current_speech_process = subprocess.Popen(cmd)
             
-            return result.returncode == 0
+            # wait for completion
+            self.current_speech_process.wait()
+            self.is_speaking = False
+            self.current_speech_process = None
             
-        except subprocess.TimeoutExpired:
-            print("⚠️  TTS command timed out")
-            return False
+            return True
+            
         except Exception as e:
             print(f"Error speaking text: {e}")
+            self.is_speaking = False
+            self.current_speech_process = None
             return False
     
-    def speak_async(self, text: str, voice: str = None, rate: float = None, pitch: float = None):
-        """Speak text asynchronously (non-blocking)"""
-        import threading
-        
-        def _speak_thread():
-            self.speak(text, voice, rate, pitch)
-        
-        thread = threading.Thread(target=_speak_thread)
-        thread.daemon = True
-        thread.start()
-    
-    def stop_speaking(self):
-        """Stop any ongoing speech"""
-        if self.system == "Darwin":
-            try:
-                # kill any running 'say' processes
-                subprocess.run(["pkill", "-f", "say"], capture_output=True)
-            except Exception:
-                pass
+
     
     def get_voice_info(self) -> dict:
         """Get information about current voice configuration"""

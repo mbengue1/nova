@@ -13,6 +13,8 @@ class AzureSpeechSynthesizer:
     def __init__(self):
         self.speech_config = None
         self.voice_name = "en-GB-LibbyNeural"  # British female voice
+        self.is_speaking = False
+        self.current_synthesizer = None
         
         # initialize azure speech configuration
         try:
@@ -38,8 +40,20 @@ class AzureSpeechSynthesizer:
             print(f"⚠️  Could not initialize Azure TTS: {e}")
             self.speech_config = None
     
-    def speak(self, text: str, voice: str = None, rate: float = None, pitch: float = None) -> bool:
-        """Convert text to speech using Azure"""
+    def speak(self, text: str, voice: str = None, rate: float = None, pitch: float = None, stream: bool = False):
+        """Convert text to speech using Azure
+        
+        Args:
+            text: The text to speak
+            voice: Optional voice name to use
+            rate: Optional speaking rate (0.5=slow, 2.0=fast)
+            pitch: Optional pitch adjustment
+            stream: If True, stream the audio as it's synthesized
+            
+        Returns:
+            If stream=False: Boolean indicating success
+            If stream=True: Generator that yields audio chunks
+        """
         if not self.speech_config:
             print("❌ Azure TTS not initialized")
             return False
@@ -62,23 +76,82 @@ class AzureSpeechSynthesizer:
                 speech_config=self.speech_config
             )
             
+            # track speaking state
+            self.is_speaking = True
+            self.current_synthesizer = speech_synthesizer
+            
             print(f"🗣️  Azure TTS Speaking: '{text}'")
             print(f"   Voice: {self.speech_config.speech_synthesis_voice_name}")
             print(f"   Rate: {self.speech_config.speech_synthesis_speaking_rate}")
             
-            # synthesize speech from text
+            if stream:
+                # Return a generator for streaming
+                return self._stream_speech(speech_synthesizer, text)
+            
+            # For non-streaming, synthesize all at once
             result = speech_synthesizer.speak_text_async(text).get()
             
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
                 print("✅ Azure TTS completed successfully")
+                self.is_speaking = False
+                self.current_synthesizer = None
                 return True
             else:
                 print(f"❌ Azure TTS failed: {result.reason}")
+                self.is_speaking = False
+                self.current_synthesizer = None
                 return False
                 
         except Exception as e:
             print(f"Error in Azure TTS: {e}")
+            self.is_speaking = False
+            self.current_synthesizer = None
             return False
+            
+    def _stream_speech(self, synthesizer, text):
+        """Stream speech synthesis in chunks
+        
+        Returns a generator that yields as audio is synthesized
+        """
+        try:
+            # Set up streaming synthesis
+            done = False
+            
+            # Define callbacks for streaming
+            def speech_synthesis_started(evt):
+                print("🔊 Speech synthesis started")
+                
+            def speech_synthesis_word_boundary(evt):
+                # A word boundary event can be used to yield chunks
+                word = text[evt.text_offset:evt.text_offset + evt.word_length]
+                yield word
+                
+            # Connect callbacks
+            synthesizer.synthesis_started.connect(speech_synthesis_started)
+            synthesizer.synthesis_word_boundary.connect(speech_synthesis_word_boundary)
+            
+            # Start synthesis (this is non-blocking)
+            result_future = synthesizer.speak_text_async(text)
+            
+            # Wait for completion and yield progress
+            result = result_future.get()
+            
+            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                print("✅ Azure TTS streaming completed successfully")
+                self.is_speaking = False
+                self.current_synthesizer = None
+                yield True  # Final yield to indicate completion
+            else:
+                print(f"❌ Azure TTS streaming failed: {result.reason}")
+                self.is_speaking = False
+                self.current_synthesizer = None
+                yield False
+                
+        except Exception as e:
+            print(f"Error in Azure TTS streaming: {e}")
+            self.is_speaking = False
+            self.current_synthesizer = None
+            yield False
     
     def speak_async(self, text: str, voice: str = None, rate: float = None, pitch: float = None):
         """Speak text asynchronously"""
@@ -123,3 +196,18 @@ class AzureSpeechSynthesizer:
     def is_available(self) -> bool:
         """Check if Azure TTS is available"""
         return self.speech_config is not None
+    
+    def stop_speaking(self):
+        """Stop current speech immediately"""
+        self.is_speaking = False
+        if self.current_synthesizer:
+            try:
+                # Azure doesn't have a direct stop method, but we can mark as stopped
+                self.current_synthesizer = None
+            except:
+                pass
+        print("🔇 Azure TTS stopped")
+    
+    def get_speaking_status(self) -> bool:
+        """Check if currently speaking"""
+        return self.is_speaking

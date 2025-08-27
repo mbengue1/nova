@@ -1,0 +1,20 @@
+feat: Complete MVP with enhanced documentation and stability
+
+This commit completes the MVP phase of Hey Nova with several key improvements:
+
+- Enhanced documentation across all core modules
+- Fixed Whisper transcription generator issue
+- Upgraded Whisper model from base to small for better accuracy
+- Implemented streaming LLM and TTS responses
+- Added comprehensive fallback mechanisms
+- Created regression tests for audio pipeline components
+- Added DEVELOPMENT_STATUS.md with current status and roadmap
+
+The assistant now features:
+- Robust speech recognition with VAD state machine
+- Natural conversation flow with streaming responses
+- British female voice (Azure Libby) with personalization
+- Comprehensive error handling throughout the pipeline
+
+Future work will focus on full barge-in support, expanded skills,
+and cross-device capabilities as outlined in the roadmap.

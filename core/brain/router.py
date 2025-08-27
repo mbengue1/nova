@@ -1,6 +1,28 @@
 """
-Nova's Brain - Routes commands to skills or LLM
-Maintains conversation context and persona
+Nova's Brain - Command Router and Intelligence Core
+
+This module serves as the central intelligence hub for Nova:
+1. Routes commands to appropriate skills based on pattern matching
+2. Provides LLM-powered conversational responses with personalization
+3. Maintains conversation history for context-aware interactions
+4. Implements streaming responses for natural conversation flow
+5. Handles skill execution for app control, system info, and more
+
+The router uses a hybrid approach - first attempting to match commands
+to specific skills, then falling back to the LLM for general queries.
+Math queries are routed directly to the LLM for better accuracy.
+
+Skills currently implemented:
+- App control (open/launch applications)
+- System information (time, date, battery, volume)
+- Notion integration (stubbed for MVP)
+
+Future enhancements:
+- Dynamic skill discovery and loading
+- Multi-step skill workflows
+- Memory integration for long-term context
+- Proactive suggestions based on user patterns
+- Fine-tuned local models for privacy-sensitive tasks
 """
 import re
 import openai
@@ -51,8 +73,17 @@ class NovaBrain:
             ]
         }
     
-    def process_input(self, user_input: str) -> str:
-        """Process user input and return appropriate response"""
+    def process_input(self, user_input: str, stream: bool = False):
+        """Process user input and return appropriate response
+        
+        Args:
+            user_input: The user's input text
+            stream: If True, returns a generator that yields response chunks
+        
+        Returns:
+            If stream=False: A string containing the full response
+            If stream=True: A generator that yields response chunks as they arrive
+        """
         if not user_input.strip():
             return "I didn't catch that. Could you please repeat?"
         
@@ -68,9 +99,14 @@ class NovaBrain:
         
         # Fallback to LLM if available
         if self.openai_client:
+            # If streaming is requested, return a generator
+            if stream:
+                return self._get_llm_response(user_input, stream=True)
+            
+            # Otherwise, get the full response
             llm_response = self._get_llm_response(user_input)
             if llm_response:
-                self.conversation_history.append({"role": "assistant", "content": llm_response})
+                # Note: When not streaming, we add response to history in _get_llm_response
                 return llm_response
         
         # Final fallback
@@ -261,13 +297,19 @@ class NovaBrain:
         # NEW: Route math requests to OpenAI LLM for better performance
         return self._get_llm_response(user_input)
     
-    def _get_llm_response(self, user_input: str) -> Optional[str]:
-        """Get response from OpenAI LLM"""
+    def _get_llm_response(self, user_input: str, stream: bool = False) -> Optional[str]:
+        """Get response from OpenAI LLM with enhanced personalization
+        
+        Args:
+            user_input: The user's input text
+            stream: If True, returns a generator that yields response chunks
+        """
         try:
-            # Build conversation context
-            messages = [{"role": "system", "content": config.persona}]
+            # Build conversation context with enhanced persona
+            enhanced_persona = config.get_enhanced_persona()
+            messages = [{"role": "system", "content": enhanced_persona}]
             
-            # Add recent conversation history (last 10 exchanges)
+            # Add recent conversation history (last 20 exchanges)
             recent_history = self.conversation_history[-20:]  # Last 20 messages
             messages.extend(recent_history)
             
@@ -275,6 +317,11 @@ class NovaBrain:
             from openai import OpenAI
             client = OpenAI(api_key=config.openai_api_key)
             
+            # If streaming is requested, return a generator
+            if stream:
+                return self._stream_llm_response(client, messages)
+            
+            # Otherwise, get the full response at once
             response = client.chat.completions.create(
                 model=config.llm_model,
                 messages=messages,
@@ -287,6 +334,38 @@ class NovaBrain:
         except Exception as e:
             print(f"Error getting LLM response: {e}")
             return None
+            
+    def _stream_llm_response(self, client, messages):
+        """Stream response chunks from the LLM
+        
+        Returns a generator that yields response chunks as they arrive
+        """
+        try:
+            # Create a streaming response
+            stream = client.chat.completions.create(
+                model=config.llm_model,
+                messages=messages,
+                max_tokens=config.max_tokens,
+                temperature=config.temperature,
+                stream=True  # Enable streaming
+            )
+            
+            # Collect the full response for history
+            full_response = ""
+            
+            # Yield each chunk as it arrives
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    full_response += content
+                    yield content
+            
+            # Add the full response to conversation history
+            self.conversation_history.append({"role": "assistant", "content": full_response})
+            
+        except Exception as e:
+            print(f"Error streaming LLM response: {e}")
+            yield f"I'm sorry, I encountered an error: {str(e)}"
     
     def get_conversation_summary(self) -> str:
         """Get a summary of the current conversation"""

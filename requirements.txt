@@ -10,6 +10,12 @@ pvporcupine>=2.2.0
 # OpenAI integration
 openai>=1.0.0
 
+# Timezone and utilities
+pytz>=2023.3
+
+# Voice Activity Detection for natural conversations
+webrtcvad>=2.0.10
+
 # Audio processing
 sounddevice>=0.4.6
 
