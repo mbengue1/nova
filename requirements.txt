@@ -1,0 +1,21 @@
+# Hey Nova MVP Dependencies
+# Core audio and speech processing
+faster-whisper>=0.9.0
+pyaudio>=0.2.11
+numpy>=1.24.0
+
+# Wake word detection
+pvporcupine>=2.2.0
+
+# OpenAI integration
+openai>=1.0.0
+
+# Audio processing
+sounddevice>=0.4.6
+
+# Future dependencies (commented out for MVP)
+# fastapi>=0.104.0
+# uvicorn>=0.24.0
+# websockets>=12.0
+# sqlite3  # Built into Python
+# cryptography>=41.0.0

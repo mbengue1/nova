@@ -82,15 +82,16 @@ Future stages will expand to Windows, iPhone, and cross-device operation, with p
 
 ## 🧰 Tools & Technologies
 
-**Core MVP**
+**Core MVP (✅ Implemented)**
 
-* **Language:** Python (or Node.js, but MVP assumes Python)
-* **Wake word:** [Porcupine](https://picovoice.ai/)
-* **STT:** Whisper (via [faster-whisper](https://github.com/guillaumekln/faster-whisper))
-* **Brain:** OpenAI ChatCompletion API (fallback); keyword router for skills
-* **TTS:** macOS built-in voices (`AVSpeechSynthesizer` / `say`)
+* **Language:** Python 3.11+ with virtual environment
+* **Wake word:** [Porcupine](https://picovoice.ai/) with custom "Hey Nova" model
+* **STT:** Whisper (via [faster-whisper](https://github.com/guillaumekln/faster-whisper)) - local processing
+* **Brain:** **LLM-first architecture** using OpenAI GPT-4o-mini for intelligent responses
+* **TTS:** **Azure Neural TTS** (Libby voice) + macOS built-in voices fallback
 * **Automation:** AppleScript/JXA for app & system control
-* **Integration:** Notion API for calendar/tasks
+* **Audio:** PyAudio with sounddevice for reliable audio processing
+* **Architecture:** Modular design with clean separation of concerns
 
 **Future**
 
@@ -131,36 +132,62 @@ hey-nova/
 
 ---
 
-## 💸 Cost (MVP vs. Future)
+## 💸 Cost (Current Implementation)
 
-* **Free**: Wake word (Porcupine free tier), Whisper local, macOS TTS, Notion API
-* **Optional cloud costs**:
-
-  * OpenAI STT: \$0.006/min (\~\$3/mo @ 15min/day)
-  * OpenAI LLM: depends on usage (\~\$5–\$15/mo light personal use)
-  * Premium TTS (Azure/ElevenLabs): \$5–\$9/mo typical
-
-MVP can run **at \$0** if you keep STT/TTS local. Future upgrades = a few dollars monthly.
+* **Free Components**: 
+  * Wake word (Porcupine free tier), Whisper local processing, macOS TTS fallback
+* **Current Cloud Costs**:
+  * OpenAI LLM (GPT-4o-mini): ~$5–$15/mo for light personal use
+  * Azure Neural TTS: ~$5–$9/mo for premium voice quality
+* **Total**: Approximately $10–$25/month for full premium experience
+* **Alternative**: Can run at **$0** using only local components (macOS TTS, local processing)
 
 ---
 
 ## 🚀 Roadmap
 
-* **MVP (Week 1–2)**
+* **MVP (✅ Completed)**
 
-  * Wake word, Whisper STT, OpenAI responses, macOS TTS, simple skills
+  * ✅ Wake word, Whisper STT, OpenAI responses, Azure Neural TTS, intelligent skills
+  * ✅ Custom "Hey Nova" wake word, continuous conversation, app control
 
-* **Stage 2 (Weeks 3–4)**
+* **Stage 2 (Next Phase)**
 
   * Proactive greetings, Notion integration, AppleScript automation
+  * Background service, menubar app, launch agent
 
-* **Stage 3 (Month 2)**
+* **Stage 3 (Future)**
 
-  * Background service, multi-device support, memory store
+  * Multi-device support, memory store, cross-platform expansion
+  * Windows, iPhone integration, centralized brain
 
-* **Stage 4 (Future)**
+* **Stage 4 (Long Term)**
 
-  * Neural TTS for cinematic voice, cross-device brain, security/encryption
+  * Advanced neural TTS, security/encryption, enterprise features
+  * Cross-device synchronization, proactive assistance
+
+---
+
+## 🚀 Current Features (MVP Complete)
+
+**✅ What's Working Now:**
+
+* **Custom Wake Word**: Trained "Hey Nova" model using Picovoice
+* **Intelligent Math**: LLM-powered problem solving and explanations
+* **App Control**: Launch applications, system automation
+* **System Info**: Time, date, battery, volume status
+* **Continuous Conversation**: Natural dialogue flow without repeating wake word
+* **Premium Voice**: Azure Neural TTS with British female voice (Libby)
+* **Professional Interface**: Clean terminal operation with error handling
+* **Modular Architecture**: Easy to extend with new skills
+
+**🎯 Key Improvements Made:**
+
+* **LLM-First Design**: OpenAI GPT-4o-mini handles all intelligent responses
+* **Audio Reliability**: Fixed PyAudio architecture issues for ARM64 Macs
+* **Frame Processing**: Optimized audio streaming for wake word detection
+* **Professional Code**: Clean, documented codebase with lowercase comments
+* **Error Handling**: Robust fallbacks and graceful degradation
 
 ---
 
