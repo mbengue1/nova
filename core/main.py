@@ -120,6 +120,18 @@ class HeyNova:
         # give welcome greeting
         self._welcome_greeting()
         
+        # Clean up old audio files to prevent disk space issues
+        try:
+            if hasattr(self.tts, 'interruption_monitor') and self.tts.interruption_monitor:
+                print("🧹 Cleaning up old audio files...")
+                deleted_count = self.tts.interruption_monitor.auto_cleanup()
+                if deleted_count > 0:
+                    print(f"✅ Cleaned up {deleted_count} old audio files")
+                else:
+                    print("✅ No old audio files to clean up")
+        except Exception as e:
+            print(f"⚠️ Audio cleanup failed: {e}")
+        
         # Start in conversation mode immediately
         print("\n🔊 Nova is ready and listening...")
         print("   (Press Ctrl+C to exit)")
@@ -131,7 +143,26 @@ class HeyNova:
         try:
             print("\n🔊 Nova is now in wake word mode - say 'Hey Nova' to activate")
             print("   (Press Ctrl+C to exit)")
+            
+            # Track time for periodic cleanup
+            last_cleanup_time = time.time()
+            cleanup_interval = 3600  # Clean up every hour
+            
             while self.is_running:
+                current_time = time.time()
+                
+                # Periodic cleanup every hour
+                if current_time - last_cleanup_time > cleanup_interval:
+                    try:
+                        if hasattr(self.tts, 'interruption_monitor') and self.tts.interruption_monitor:
+                            print("🧹 Periodic audio cleanup...")
+                            deleted_count = self.tts.interruption_monitor.auto_cleanup()
+                            if deleted_count > 0:
+                                print(f"✅ Periodic cleanup: {deleted_count} files removed")
+                    except Exception as e:
+                        print(f"⚠️ Periodic cleanup failed: {e}")
+                    last_cleanup_time = current_time
+                
                 time.sleep(0.1)
         except KeyboardInterrupt:
             print("\n🛑 Shutting down Nova...")

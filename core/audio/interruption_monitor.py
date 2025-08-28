@@ -439,3 +439,94 @@ class InterruptionMonitor:
             str: Path to the audio file, or None if no file was captured
         """
         return self.interruption_audio_file if os.path.exists(self.interruption_audio_file or "") else None
+    
+    def cleanup_old_audio_files(self, max_files: int = 10, max_age_hours: int = 24) -> int:
+        """Clean up old interruption audio files to prevent disk space issues
+        
+        Args:
+            max_files: Maximum number of files to keep (default: 10)
+            max_age_hours: Maximum age of files in hours (default: 24)
+            
+        Returns:
+            int: Number of files deleted
+        """
+        try:
+            if not os.path.exists("audio_cache"):
+                return 0
+                
+            # Get all interruption audio files
+            audio_files = []
+            for filename in os.listdir("audio_cache"):
+                if filename.startswith("interruption_") and filename.endswith(".wav"):
+                    filepath = os.path.join("audio_cache", filename)
+                    stat = os.stat(filepath)
+                    audio_files.append({
+                        'path': filepath,
+                        'name': filename,
+                        'mtime': stat.st_mtime,
+                        'size': stat.st_size
+                    })
+            
+            if not audio_files:
+                return 0
+            
+            # Sort by modification time (newest first)
+            audio_files.sort(key=lambda x: x['mtime'], reverse=True)
+            
+            files_to_delete = []
+            current_time = time.time()
+            
+            # Mark files for deletion based on age
+            for file_info in audio_files:
+                try:
+                    age_hours = (current_time - file_info['mtime']) / 3600
+                    if age_hours > max_age_hours:
+                        files_to_delete.append(file_info)
+                except KeyError as e:
+                    print(f"❌ Debug: file_info missing key: {e}")
+                    print(f"❌ Debug: file_info structure: {file_info}")
+                    continue
+            
+            # Mark files for deletion based on count (keep only max_files)
+            if len(audio_files) > max_files:
+                # Keep the newest max_files, mark the rest for deletion
+                files_to_keep = audio_files[:max_files]
+                files_to_delete.extend([f for f in audio_files if f not in files_to_keep])
+            
+            # Remove duplicates from files_to_delete (keep unique paths)
+            unique_files_to_delete = []
+            seen_paths = set()
+            for file_info in files_to_delete:
+                if file_info['path'] not in seen_paths:
+                    unique_files_to_delete.append(file_info)
+                    seen_paths.add(file_info['path'])
+            files_to_delete = unique_files_to_delete
+            
+            # Delete marked files
+            deleted_count = 0
+            total_size_saved = 0
+            
+            for file_info in files_to_delete:
+                try:
+                    os.remove(file_info['path'])
+                    deleted_count += 1
+                    total_size_saved += file_info['size']
+                    print(f"🗑️ Cleaned up old audio file: {file_info['name']}")
+                except Exception as e:
+                    print(f"❌ Failed to delete {file_info['name']}: {e}")
+            
+            if deleted_count > 0:
+                size_mb = total_size_saved / (1024 * 1024)
+                print(f"🧹 Cleanup complete: {deleted_count} files deleted, {size_mb:.2f} MB freed")
+            
+            return deleted_count
+            
+        except Exception as e:
+            print(f"❌ Error during audio cleanup: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
+    
+    def auto_cleanup(self) -> None:
+        """Automatically clean up old audio files with sensible defaults"""
+        self.cleanup_old_audio_files(max_files=10, max_age_hours=24)
