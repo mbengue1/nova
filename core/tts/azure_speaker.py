@@ -60,6 +60,10 @@ class AzureSpeechSynthesizer:
         
         if not text.strip():
             return False
+            
+        # Stop any current speech before starting a new one
+        if self.is_speaking:
+            self.stop_speaking()
         
         try:
             # update voice if specified

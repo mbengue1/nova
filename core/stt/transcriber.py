@@ -353,8 +353,26 @@ class SpeechTranscriber:
             # normalize audio data and boost volume for better detection
             audio_array = audio_array.astype(np.float32) / 32768.0
             
-            # apply volume boost (2x) to improve speech detection
-            audio_array = np.clip(audio_array * 2.0, -1.0, 1.0)
+            # Dynamic normalization to handle different volume levels
+            # First calculate RMS volume
+            rms = np.sqrt(np.mean(audio_array**2))
+            
+            # Apply adaptive gain based on volume
+            if rms < 0.05:  # Very quiet audio
+                gain = 3.0  # Higher boost for quiet audio
+            elif rms < 0.1:  # Moderately quiet audio
+                gain = 2.5
+            elif rms < 0.2:  # Normal audio
+                gain = 2.0
+            else:  # Already loud audio
+                gain = 1.5
+                
+            # Apply the calculated gain with clipping to prevent distortion
+            audio_array = np.clip(audio_array * gain, -1.0, 1.0)
+            
+            # Apply noise gate to reduce background noise
+            noise_gate = 0.01  # Threshold below which audio is considered noise
+            audio_array[np.abs(audio_array) < noise_gate] = 0.0
             
             # log transcription start
             logger.log_stt_event("transcription_started",
@@ -363,7 +381,7 @@ class SpeechTranscriber:
                 audio_duration_ms=len(audio_array) / config.sample_rate * 1000
             )
             
-            # transcribe audio with whisper model - improved parameters
+            # transcribe audio with whisper model - enhanced parameters for better accuracy
             segments, _ = self.whisper_model.transcribe(
                 audio_array,
                 language="en",
@@ -371,11 +389,14 @@ class SpeechTranscriber:
                 word_timestamps=True,
                 vad_filter=True,
                 vad_parameters=dict(
-                    min_silence_duration_ms=200,  # shorter silence detection
-                    threshold=0.2  # more sensitive
+                    min_silence_duration_ms=100,  # even shorter silence detection
+                    threshold=0.15  # more sensitive for better speech detection
                 ),
                 condition_on_previous_text=False,  # don't bias based on previous text
-                temperature=0.0  # use greedy decoding for more accurate results
+                temperature=0.0,  # use greedy decoding for more accurate results
+                no_speech_threshold=0.4,  # more sensitive to detect speech
+                compression_ratio_threshold=2.4,  # better handling of background noise
+                log_prob_threshold=-1.0  # more lenient probability threshold
             )
             
             # extract transcription text from segments (convert generator to list)
@@ -414,22 +435,61 @@ class SpeechTranscriber:
                     short_phrases = ["yes", "no", "hi", "hey", "okay", "thanks", "stop", "help", 
                                     "what", "time", "weather", "how", "why", "when", "where"]
                     
-                    # Check if audio duration is very short (less than 1000ms of speech)
+                    # Check if audio duration is very short (less than 1500ms of speech)
                     speech_duration_ms = self._vad_state['speech_frame_count'] * self.frame_ms
                     logger.log("short_utterance_attempt", {
                         "speech_frames": self._vad_state['speech_frame_count'],
                         "speech_duration_ms": speech_duration_ms
                     })
                     
-                    if speech_duration_ms < 1000:
-                        # Try to make better guesses based on speech duration
+                    if speech_duration_ms < 1500:
+                        # Try to make better guesses based on speech duration and energy pattern
+                        # Get audio data for energy analysis
+                        audio_data = b''.join(self._vad_state['utterance_buffer'])
+                        audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+                        
+                        # Calculate energy features
+                        energy = np.abs(audio_array)
+                        mean_energy = np.mean(energy)
+                        energy_variance = np.var(energy)
+                        
+                        # Calculate zero crossing rate (voice characteristic)
+                        zero_crossings = np.sum(np.abs(np.diff(np.signbit(audio_array))))
+                        zero_crossing_rate = zero_crossings / len(audio_array) if len(audio_array) > 0 else 0
+                        
+                        # More sophisticated pattern matching based on speech characteristics
                         if speech_duration_ms < 300:
-                            guess = "yes"
-                        elif speech_duration_ms < 500:
-                            guess = "okay" 
+                            # Very short utterances: yes, no, hi
+                            if zero_crossing_rate > 0.2:  # Higher frequency content ("yes")
+                                guess = "yes"
+                            elif mean_energy > 0.2:  # Louder, shorter sound ("no")
+                                guess = "no"
+                            else:
+                                guess = "hi"
+                        elif speech_duration_ms < 600:
+                            # Short utterances: okay, stop, thanks
+                            if zero_crossing_rate < 0.15 and energy_variance < 0.01:  # Smoother sound ("okay")
+                                guess = "okay"
+                            elif mean_energy > 0.25:  # Louder, sharper sound ("stop")
+                                guess = "stop"
+                            else:
+                                guess = "thanks"
+                        elif speech_duration_ms < 900:
+                            # Medium short utterances: cancel, continue, goodbye
+                            if energy_variance > 0.015:  # More varied energy ("cancel")
+                                guess = "cancel"
+                            elif zero_crossing_rate > 0.18:  # More varied frequency ("continue")
+                                guess = "continue"
+                            else:
+                                guess = "goodbye"
                         else:
-                            # For slightly longer utterances, try to guess question words
-                            guess = "what time is it" if 500 <= speech_duration_ms < 700 else "what's the weather"
+                            # Slightly longer utterances (900-1500ms)
+                            if mean_energy > 0.2:  # Stronger utterance
+                                guess = "good night"
+                            elif zero_crossing_rate > 0.2:  # More varied frequency
+                                guess = "what time is it"
+                            else:
+                                guess = "what's the weather"
                         logger.log_stt_event("transcription_short_guess",
                             utterance_id=utterance_id,
                             latency_ms=latency_ms,

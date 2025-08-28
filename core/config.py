@@ -51,18 +51,21 @@ class NovaConfig:
         # Voice Activity Detection settings (Phase 2 - Hysteresis + Preroll/Postroll)
         self.vad_enabled = True
         self.vad_frame_duration = 30  # milliseconds per frame (480 samples @ 16kHz)
-        self.vad_on_threshold = 0.30  # speech probability threshold to enter speech (LOWERED)
-        self.vad_off_threshold = 0.20  # speech probability threshold to exit speech (LOWERED)
-        self.vad_enter_consec = 2  # consecutive frames needed to enter speech (REDUCED)
-        self.vad_exit_consec = 6  # consecutive frames needed to exit speech (REDUCED)
-        self.vad_preroll_ms = 200  # milliseconds to capture before speech (REDUCED)
-        self.vad_postroll_ms = 300  # milliseconds to capture after speech (REDUCED)
-        self.vad_max_utterance_ms = 12000  # maximum utterance length
+        self.vad_on_threshold = 0.25  # speech probability threshold to enter speech (MORE SENSITIVE)
+        self.vad_off_threshold = 0.15  # speech probability threshold to exit speech (MORE SENSITIVE)
+        self.vad_enter_consec = 1  # consecutive frames needed to enter speech (MORE RESPONSIVE)
+        self.vad_exit_consec = 8  # consecutive frames needed to exit speech (INCREASED for better phrase capture)
+        self.vad_preroll_ms = 300  # milliseconds to capture before speech (INCREASED for better context)
+        self.vad_postroll_ms = 500  # milliseconds to capture after speech (INCREASED for better phrase completion)
+        self.vad_max_utterance_ms = 15000  # maximum utterance length (INCREASED)
         self.vad_aggressiveness = 1  # webrtcvad aggressiveness (0-3) - MORE SENSITIVE
-        self.vad_timeout = 15  # maximum seconds to listen before timeout
+        self.vad_timeout = 20  # maximum seconds to listen before timeout (INCREASED)
         
         # Legacy recording (fallback)
         self.record_seconds = 5
+        
+        # Conversation settings
+        self.conversation_timeout = 30  # Seconds of inactivity before returning to wake word mode
         
         # Porcupine settings
         self.picovoice_access_key = os.getenv("PICOVOICE_ACCESS_KEY", "")

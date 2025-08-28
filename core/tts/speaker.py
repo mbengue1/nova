@@ -64,15 +64,41 @@ class SpeechSynthesizer:
         
         return []
     
+    def _clean_text_for_speech(self, text: str) -> str:
+        """Clean text to make it more natural for speech output
+        
+        Removes markdown formatting, asterisks, and other text that shouldn't be spoken
+        """
+        import re
+        
+        # Replace markdown bold/italic with nothing
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+        text = re.sub(r'\*(.*?)\*', r'\1', text)
+        
+        # Replace bullet points with natural pauses
+        text = re.sub(r'^\s*-\s*', 'Next, ', text, flags=re.MULTILINE)
+        
+        # Clean up any double spaces
+        text = re.sub(r'\s{2,}', ' ', text)
+        
+        return text
+        
     def speak(self, text: str, voice: str = None, rate: float = None, pitch: float = None) -> bool:
         """Convert text to speech and play it"""
         if not text.strip():
             return False
+            
+        # Stop any current speech before starting a new one
+        if self.is_currently_speaking():
+            self.stop_speaking()
         
+        # Clean text for more natural speech
+        cleaned_text = self._clean_text_for_speech(text)
+            
         # try azure tts first for high quality speech
         if self.azure_tts and self.azure_tts.is_available():
             print("🎭 Using Azure TTS (high quality)")
-            return self.azure_tts.speak(text, voice, rate, pitch)
+            return self.azure_tts.speak(cleaned_text, voice, rate, pitch)
         
         # fallback to macos built-in tts
         print("🍎 Using macOS TTS (fallback)")
@@ -81,7 +107,7 @@ class SpeechSynthesizer:
         pitch = pitch or config.voice_pitch
         
         if self.system == "Darwin":  # macos
-            return self._speak_macos(text, voice, rate, pitch)
+            return self._speak_macos(cleaned_text, voice, rate, pitch)
         else:
             # fallback for other operating systems
             print(f"TTS not supported on {self.system}")

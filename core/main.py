@@ -72,45 +72,57 @@ class HeyNova:
         print("🔔 Wakeword: frame=512 samples (Porcupine)")
         print("🧠 VAD/STT:  frame=480 samples (30 ms @ 16 kHz)")
         print("📝 Verbose logging: " + ("Enabled" if self.verbose_logging else "Disabled"))
+        print("💬 Starting in conversation mode - speak directly after greeting")
         
         # validate system configuration
         config.validate_config()
         
+        # Initialize wake word detection in background
+        try:
+            self.wake_detector.start_listening()
+            print("✅ Wake word detection initialized (for use after timeout)")
+        except Exception as e:
+            print(f"⚠️  Wake word detection failed: {e}")
+            print("⚠️  Conversation mode will not be able to return to wake word mode")
+        
+        # Set initial mode to conversation
+        self.current_mode = "conversation"
+        self.is_running = True
+        
         # give welcome greeting
         self._welcome_greeting()
         
-        # start wake word detection
-        try:
-            self.wake_detector.start_listening()
-            self.current_mode = "wake_word"
-            print("🎧 Listening for 'Hey Nova'...")
-        except Exception as e:
-            print(f"⚠️  Wake word detection failed: {e}")
-            print("🔄 Falling back to push-to-talk mode...")
-            self.push_to_talk.start_listening()
-            self.current_mode = "push_to_talk"
+        # Start in conversation mode immediately
+        print("\n🔊 Nova is ready and listening...")
+        print("   (Press Ctrl+C to exit)")
         
-        self.is_running = True
+        # Process first input directly without wake word
+        self._process_user_input(use_streaming=True, first_interaction=True)
         
-        # main system loop
+        # main system loop - after first interaction, system will be in wake word mode
         try:
-            print("\n🔊 Nova is ready and listening...")
+            print("\n🔊 Nova is now in wake word mode - say 'Hey Nova' to activate")
             print("   (Press Ctrl+C to exit)")
             while self.is_running:
                 time.sleep(0.1)
         except KeyboardInterrupt:
-            print("\n🛑 Shutting down...")
+            print("\n🛑 Shutting down Nova...")
+            self.is_running = False
         finally:
             self.cleanup()
     
     def _on_wake_word(self):
         """Called when wake word is detected"""
         print("\n🔔 Wake word detected!")
+        print("💬 Entering conversation mode...")
+        self.current_mode = "conversation"
         self._process_user_input()
     
     def _on_push_to_talk(self):
         """Called when push-to-talk is activated"""
         print("\n🎤 Push-to-talk activated!")
+        print("💬 Entering conversation mode...")
+        self.current_mode = "conversation"
         self._process_user_input()
     
     def _interrupt_speech(self):
@@ -134,10 +146,8 @@ class HeyNova:
                 greeting = "Good morning"
             elif 12 <= hour < 17:
                 greeting = "Good afternoon"
-            elif 17 <= hour < 21:
-                greeting = "Good evening"
             else:
-                greeting = "Good night"
+                greeting = "Good evening"
             
             welcome_message = f"{greeting}, {config.user_title}! Welcome home. How may I serve you today?"
             
@@ -189,15 +199,19 @@ class HeyNova:
         except Exception as e:
             logger.log("hud_error", {"error": str(e)}, "ERROR")
     
-    def _process_user_input(self, use_streaming: bool = True):
+    def _process_user_input(self, use_streaming: bool = True, first_interaction: bool = False):
         """Process user input through the full pipeline
         
         Args:
             use_streaming: Whether to use streaming responses
+            first_interaction: Whether this is the first interaction after startup
         """
         try:
             # get speech input from user with fallback mechanisms
-            print("🎤 Listening for your request...")
+            if first_interaction:
+                print("🎤 I'm listening... (speak now)")
+            else:
+                print("🎤 Listening for your request...")
             
             # Try VAD-based recording first
             user_input = None
@@ -327,11 +341,46 @@ class HeyNova:
         Args:
             use_streaming: Whether to use streaming responses
         """
+        import threading
+        import time
+        from core.config import config
+        
         print("\n💬 Conversation mode: I'm listening for your response...")
-        print("   (Speak naturally - I'll respond when you pause, or say 'goodbye' to exit)")
+        print(f"   (Speak naturally - I'll respond when you pause, say 'goodbye' to exit, or wait {config.conversation_timeout}s for wake word mode)")
+        
+        # Set up inactivity timer
+        last_activity_time = time.time()
+        conversation_active = True
+        
+        # Function to monitor inactivity
+        def check_inactivity():
+            nonlocal conversation_active, last_activity_time
+            while conversation_active:
+                current_time = time.time()
+                elapsed = current_time - last_activity_time
+                
+                # Check if currently speaking
+                if self.tts.is_currently_speaking():
+                    # Reset timer while speaking
+                    last_activity_time = current_time
+                    continue
+                    
+                # Only timeout when not speaking and after timeout period
+                if elapsed > config.conversation_timeout:
+                    conversation_active = False
+                    print(f"\n⏰ Conversation timeout after {config.conversation_timeout} seconds of inactivity")
+                    self._return_to_wake_word_mode()
+                    return
+                
+                # Check every second
+                time.sleep(1)
+        
+        # Start inactivity monitor in background thread
+        inactivity_thread = threading.Thread(target=check_inactivity, daemon=True)
+        inactivity_thread.start()
         
         # continue listening for user responses
-        while True:
+        while conversation_active:
             try:
                 # listen for follow-up response with fallbacks
                 print("🎤 Listening... (speak naturally)")
@@ -339,7 +388,13 @@ class HeyNova:
                 # Try VAD-based recording first
                 user_input = None
                 try:
+                    # Reset inactivity timer when starting to listen
+                    last_activity_time = time.time()
+                    
                     user_input = self.stt.record_audio_with_vad()
+                    
+                    # Reset inactivity timer when speech is detected
+                    last_activity_time = time.time()
                 except Exception as stt_error:
                     logger.log("stt_error", {"error": str(stt_error), "method": "vad", "mode": "conversation"}, "ERROR")
                     print(f"⚠️  VAD recording failed: {stt_error}")
@@ -348,18 +403,38 @@ class HeyNova:
                     # Fallback to fixed duration recording
                     try:
                         user_input = self.stt.record_audio_fixed()
+                        
+                        # Reset inactivity timer when speech is detected
+                        if user_input:
+                            last_activity_time = time.time()
                     except Exception as fixed_error:
                         logger.log("stt_error", {"error": str(fixed_error), "method": "fixed", "mode": "conversation"}, "ERROR")
                         print(f"⚠️  Fixed recording failed: {fixed_error}")
+                
+                # Check if conversation is still active (might have timed out during recording)
+                if not conversation_active:
+                    return
                 
                 if not user_input:
                     print("⚠️  No speech detected, continuing to listen...")
                     continue
                 
-                # check for exit commands
-                if any(word in user_input.lower() for word in ['goodbye', 'exit', 'stop', 'end', 'good night', 'bye', 'see you']):
+                # check for exit commands and shutdown commands
+                exit_commands = ['goodbye', 'exit', 'stop', 'end', 'good night', 'goodnight', 'bye', 'see you']
+                shutdown_commands = ['shut down', 'shutdown', 'power off', 'turn off', 'terminate']
+                
+                if any(word in user_input.lower() for word in exit_commands):
                     print("👋 Ending conversation, returning to wake word mode...")
-                    self._speak_with_fallback("Goodbye! I'll be here when you need me.")
+                    conversation_active = False
+                    self._return_to_wake_word_mode("Goodbye! I'll be here when you need me.")
+                    return  # exit conversation mode completely
+                
+                # Check for shutdown commands
+                elif any(cmd in user_input.lower() for cmd in shutdown_commands):
+                    print("🛑 Shutdown command detected...")
+                    self._speak_with_fallback("Shutting down now. Goodbye!")
+                    self.is_running = False
+                    conversation_active = False
                     return  # exit conversation mode completely
                 
                 print(f"👤 You said: '{user_input}'")
@@ -386,6 +461,9 @@ class HeyNova:
                         # Speak the full response with fallback
                         if not self._speak_with_fallback(full_response):
                             print("⚠️  TTS failed")
+                        else:
+                            # Reset activity timer after speaking
+                            last_activity_time = time.time()
                     else:
                         # Get full response at once
                         response = self.brain.process_input(user_input)
@@ -394,14 +472,21 @@ class HeyNova:
                             print(f"🤖 Nova: {response}")
                             if not self._speak_with_fallback(response):
                                 print("⚠️  TTS failed")
+                            else:
+                                # Reset activity timer after speaking
+                                last_activity_time = time.time()
                         else:
                             print("⚠️  No response generated")
                             self._speak_with_fallback("I'm sorry, I couldn't process that.")
+                            # Reset activity timer after speaking
+                            last_activity_time = time.time()
                             continue
                 except Exception as brain_error:
                     logger.log("brain_error", {"error": str(brain_error), "mode": "conversation"}, "ERROR")
                     print(f"⚠️  Brain processing failed: {brain_error}")
                     self._speak_with_fallback("I'm having trouble processing that. Let's continue our conversation.")
+                    # Reset activity timer after speaking
+                    last_activity_time = time.time()
                     
                     # Fallback to simple response
                     try:
@@ -409,6 +494,8 @@ class HeyNova:
                         response = "I'm sorry, I'm having trouble with my advanced processing. Could you try asking me something else?"
                         print(f"🤖 Nova (fallback): {response}")
                         self._speak_with_fallback(response)
+                        # Reset activity timer after speaking
+                        last_activity_time = time.time()
                     except:
                         pass
                 
@@ -420,46 +507,127 @@ class HeyNova:
                     print(f"⚠️  STT reset failed: {reset_error}")
                     
             except KeyboardInterrupt:
-                print("\n🔄 Returning to wake word mode...")
-                break
+                print("\n🛑 Keyboard interrupt detected...")
+                conversation_active = False
+                return  # Exit conversation mode
             except Exception as e:
                 logger.log("conversation_error", {"error": str(e)}, "ERROR")
                 print(f"Error in conversation mode: {e}")
                 self._speak_with_fallback("I encountered an error. Let's continue our conversation.")
+                # Reset activity timer after speaking
+                last_activity_time = time.time()
+    
+    def _return_to_wake_word_mode(self, message: str = "I'll be listening for 'Hey Nova' when you need me again."):
+        """Return to wake word detection mode with a message
+        
+        Args:
+            message: The message to speak before returning to wake word mode
+        """
+        # Speak the transition message
+        self._speak_with_fallback(message)
+        
+        # Set mode to wake word
+        self.current_mode = "wake_word"
+        
+        # Make sure wake word detection is active
+        try:
+            if hasattr(self.wake_detector, 'is_listening') and not self.wake_detector.is_listening:
+                self.wake_detector.start_listening()
+            print("🔔 Wake word detection active - say 'Hey Nova' when you need me")
+        except Exception as e:
+            print(f"⚠️  Error activating wake word detection: {e}")
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""
         print(f"\n🛑 Received signal {signum}, shutting down...")
         self.is_running = False
+        
+        try:
+            # Force immediate cleanup and exit
+            self.cleanup()
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+        finally:
+            # Force exit regardless of cleanup success
+            import os
+            os._exit(0)
     
     def cleanup(self):
         """Clean up resources"""
         print("🧹 Cleaning up...")
         
-        # say goodbye before shutting down
+        # Force stop any active processes
+        self.is_running = False
+        
+        # Stop any active speech first
         try:
-            self.tts.speak("Goodbye! It was a pleasure serving you.")
-        except:
+            self.tts.stop_speaking()
+            print("🔇 Speech stopped")
+        except Exception:
+            pass
+            
+        # Say goodbye before shutting down (only if not already speaking)
+        try:
+            if not self.tts.is_currently_speaking():
+                self.tts.speak("Goodbye! It was a pleasure serving you.")
+        except Exception:
             pass
         
-        if self.current_mode == "wake_word":
+        # Clean up wake word detector
+        try:
             self.wake_detector.cleanup()
-        else:
+            print("🔇 Wake word detection stopped")
+        except Exception as e:
+            print(f"⚠️  Error stopping wake word detection: {e}")
+            
+        # Clean up push-to-talk if active
+        try:
             self.push_to_talk.stop_listening()
+            print("🔇 Push-to-talk stopped")
+        except Exception:
+            pass
         
-        self.stt.cleanup()
-        self.tts.stop_speaking()
+        # Clean up STT
+        try:
+            self.stt.cleanup()
+            print("🔇 Speech recognition stopped")
+        except Exception:
+            pass
+        
+        # Final stop of TTS
+        try:
+            self.tts.stop_speaking()
+        except Exception:
+            pass
         
         print("✅ Cleanup complete. Goodbye!")
 
 def main():
     """Main entry point"""
+    nova = None
     try:
         nova = HeyNova()
         nova.start()
+    except KeyboardInterrupt:
+        print("\n🛑 Keyboard interrupt detected, shutting down...")
+        if nova:
+            try:
+                nova.cleanup()
+            except Exception as e:
+                print(f"Error during cleanup: {e}")
+        # Force exit to avoid segmentation faults
+        import os
+        os._exit(0)
     except Exception as e:
         print(f"Fatal error: {e}")
-        sys.exit(1)
+        if nova:
+            try:
+                nova.cleanup()
+            except:
+                pass
+        # Force exit to avoid segmentation faults
+        import os
+        os._exit(1)
 
 if __name__ == "__main__":
     main()
