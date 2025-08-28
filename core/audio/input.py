@@ -238,6 +238,31 @@ class AudioInputManager:
     
     def cleanup(self):
         """Clean up resources"""
-        self.stop_recording()
-        self.ring_buffer.clear()
-        logger.log("audio_input_cleanup", {})
+        try:
+            # Stop recording if active
+            self.stop_recording()
+            
+            # Clear ring buffer
+            if hasattr(self, 'ring_buffer'):
+                self.ring_buffer.clear()
+            
+            # Clear callback reference
+            if hasattr(self, 'frame_callback'):
+                self.frame_callback = None
+            
+            # Ensure audio stream is properly closed
+            if hasattr(self, 'audio_stream') and self.audio_stream:
+                try:
+                    if hasattr(self.audio_stream, 'stop'):
+                        self.audio_stream.stop()
+                    if hasattr(self.audio_stream, 'close'):
+                        self.audio_stream.close()
+                except Exception as e:
+                    print(f"⚠️ Error closing audio stream: {e}")
+                finally:
+                    self.audio_stream = None
+            
+            logger.log("audio_input_cleanup", {})
+            print("🔇 Audio input cleanup complete")
+        except Exception as e:
+            print(f"⚠️ Error during audio input cleanup: {e}")

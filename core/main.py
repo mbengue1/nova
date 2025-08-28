@@ -33,6 +33,8 @@ from stt import SpeechTranscriber
 from tts import SpeechSynthesizer
 from brain import NovaBrain
 from nova_logger import logger
+from core.services.time_based_focus import TimeBasedFocusController
+from core.services.spotify_service import SpotifyService
 
 class HeyNova:
     """Main Nova assistant class"""
@@ -51,6 +53,15 @@ class HeyNova:
         # initialize wake word detection systems
         self.wake_detector = WakeWordDetector(self._on_wake_word)
         self.push_to_talk = PushToTalkDetector(self._on_push_to_talk)
+        
+        # initialize time-based focus controller
+        self.time_based_focus = TimeBasedFocusController()
+        
+        # initialize spotify service
+        self.spotify = SpotifyService()
+        
+        # Set default playlist for welcome greeting
+        self.default_playlist = "Nightmode"
         
         # system state variables
         self.is_running = False
@@ -94,6 +105,13 @@ class HeyNova:
         except Exception as e:
             print(f"⚠️  Wake word detection failed: {e}")
             print("⚠️  Conversation mode will not be able to return to wake word mode")
+        
+        # Start time-based focus controller
+        try:
+            self.time_based_focus.start()
+            print("✅ Time-based focus controller started")
+        except Exception as e:
+            print(f"⚠️  Time-based focus controller failed: {e}")
         
         # Set initial mode to conversation
         self.current_mode = "conversation"
@@ -198,10 +216,14 @@ class HeyNova:
             # get current time for appropriate greeting
             from datetime import datetime
             import pytz
+            from core.services.calendar_service import CalendarService
             
             tz = pytz.timezone(config.timezone)
             current_time = datetime.now(tz)
             hour = current_time.hour
+            
+            # Check if we're in the afternoon/evening (after 12 PM)
+            is_afternoon_or_evening = hour >= 12
             
             if 5 <= hour < 12:
                 greeting = "Good morning"
@@ -210,7 +232,59 @@ class HeyNova:
             else:
                 greeting = "Good evening"
             
-            welcome_message = f"{greeting}, {config.user_title}! Welcome home. How may I serve you today?"
+            # Base welcome message in futuristic tone
+            welcome_message = f"{greeting}, {config.user_title}! Welcome home."
+            
+            # Add focus mode information for afternoon/evening hours (after 12 PM)
+            if is_afternoon_or_evening:
+                welcome_message += " I've set your home to private mode."
+                
+                # Ensure Do Not Disturb is enabled
+                try:
+                    self.time_based_focus.focus_controller.set_do_not_disturb(True)
+                except Exception:
+                    pass
+            
+            # Add calendar information for the rest of the day
+            try:
+                calendar_service = CalendarService()
+                calendar_info = calendar_service.format_rest_of_day_schedule()
+                welcome_message += f" {calendar_info}"
+            except Exception as e:
+                print(f"Error getting calendar info: {e}")
+            
+            # Add productive day message
+            welcome_message += " Hope you have a productive day."
+            
+            # Add Spotify music for afternoon/evening
+            if is_afternoon_or_evening:
+                try:
+                    # Try to start the default playlist
+                    playlist_name = self.default_playlist
+                    if self.spotify.is_available():
+                        # Check if playlist exists
+                        playlist = self.spotify.find_playlist_by_name(playlist_name)
+                        if playlist:
+                            # Check if we have an active device before trying to start
+                            devices = self.spotify.get_available_devices()
+                            if devices and any(device.get('is_active', False) for device in devices):
+                                welcome_message += f" I've started playing your {playlist_name} playlist on Spotify."
+                                # Start the playlist in background (don't wait for completion)
+                                try:
+                                    self.spotify.start_playlist(playlist_name)
+                                    print(f"🎵 Successfully started {playlist_name} playlist")
+                                except Exception as e:
+                                    print(f"Spotify playlist start error: {e}")
+                                    welcome_message += " I'm ready to help you with music when you ask."
+                            else:
+                                welcome_message += " I'm ready to help you with music when you ask."
+                        else:
+                            welcome_message += " I couldn't find your default playlist, but I'm ready to play music when you ask."
+                    else:
+                        welcome_message += " I'm ready to help you with music when you want."
+                except Exception as e:
+                    print(f"Spotify integration error: {e}")
+                    welcome_message += " I'm ready to help you with music when you want."
             
             print(f"🎭 {welcome_message}")
             self.tts.speak(welcome_message)
@@ -742,14 +816,12 @@ class HeyNova:
         self.is_running = False
         
         try:
-            # Force immediate cleanup and exit
+            # Perform cleanup
             self.cleanup()
         except Exception as e:
             print(f"Error during cleanup: {e}")
         finally:
-            # Force exit regardless of cleanup success
-            import os
-            os._exit(0)
+            print("🔄 Signal handler cleanup complete")
     
     def cleanup(self):
         """Clean up resources"""
@@ -758,19 +830,28 @@ class HeyNova:
         # Force stop any active processes
         self.is_running = False
         
-        # Stop any active speech first
+        # Stop time-based focus controller first (it has a thread)
+        try:
+            self.time_based_focus.stop()
+            print("🌙 Time-based focus controller stopped")
+        except Exception as e:
+            print(f"⚠️  Error stopping time-based focus controller: {e}")
+        
+        # Stop any active speech
         try:
             self.tts.stop_speaking()
             print("🔇 Speech stopped")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️  Error stopping speech: {e}")
             
         # Say goodbye before shutting down (only if not already speaking)
         try:
             if not self.tts.is_currently_speaking():
                 self.tts.speak("Goodbye! It was a pleasure serving you.")
-        except Exception:
-            pass
+                # Give it a moment to finish speaking
+                time.sleep(1)
+        except Exception as e:
+            print(f"⚠️  Error saying goodbye: {e}")
         
         # Clean up wake word detector
         try:
@@ -783,23 +864,41 @@ class HeyNova:
         try:
             self.push_to_talk.stop_listening()
             print("🔇 Push-to-talk stopped")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️  Error stopping push-to-talk: {e}")
         
         # Clean up STT
         try:
             self.stt.cleanup()
             print("🔇 Speech recognition stopped")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️  Error stopping speech recognition: {e}")
         
         # Final stop of TTS
         try:
             self.tts.stop_speaking()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️  Final TTS stop error: {e}")
         
         print("✅ Cleanup complete. Goodbye!")
+        
+        # Final cleanup of any remaining resources
+        try:
+            # Force garbage collection to clean up any remaining objects
+            import gc
+            gc.collect()
+            
+            # Clear any remaining references
+            self.brain = None
+            self.tts = None
+            self.stt = None
+            self.wake_detector = None
+            self.push_to_talk = None
+            self.time_based_focus = None
+            
+            print("🧹 Final resource cleanup complete")
+        except Exception as e:
+            print(f"⚠️ Error during final cleanup: {e}")
 
 def main():
     """Main entry point"""
@@ -814,19 +913,23 @@ def main():
                 nova.cleanup()
             except Exception as e:
                 print(f"Error during cleanup: {e}")
-        # Force exit to avoid segmentation faults
-        import os
-        os._exit(0)
+        print("🔄 Exiting gracefully...")
     except Exception as e:
         print(f"Fatal error: {e}")
         if nova:
             try:
                 nova.cleanup()
-            except:
-                pass
-        # Force exit to avoid segmentation faults
-        import os
-        os._exit(1)
+            except Exception as cleanup_error:
+                print(f"Error during cleanup: {cleanup_error}")
+        print("🔄 Exiting due to fatal error...")
+    finally:
+        # Ensure cleanup happens even if there are errors
+        if nova:
+            try:
+                nova.cleanup()
+            except Exception as e:
+                print(f"Final cleanup error: {e}")
+        print("✅ Exit complete")
 
 if __name__ == "__main__":
     main()

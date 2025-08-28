@@ -14,207 +14,21 @@ from typing import List, Dict, Any, Optional, Union
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.config import config
 from core.integrations.notion_client import NotionClient
+
+# Import Google Calendar service with better error handling
+GoogleCalendarService = None
 try:
+    # Try absolute import
     from core.services.google_calendar_service import GoogleCalendarService
-except ImportError:
-    # If Google Calendar service is not available, we'll fall back to Notion
+    print("✅ GoogleCalendarService imported via absolute import")
+except ImportError as e:
+    print(f"⚠️  GoogleCalendarService import failed: {e}")
     GoogleCalendarService = None
 
-class CalendarEvent:
-    """Represents a calendar event (either class or Notion event)"""
-    
-    def __init__(self, 
-                title: str,
-                start_time: str,
-                end_time: Optional[str] = None,
-                location: Optional[str] = None,
-                description: Optional[str] = None,
-                event_type: str = "event",  # "class" or "event"
-                all_day: bool = False,
-                tags: Optional[List[str]] = None,
-                url: Optional[str] = None):
-        self.title = title
-        self.start_time = start_time
-        self.end_time = end_time
-        self.location = location
-        self.description = description
-        self.event_type = event_type
-        self.all_day = all_day
-        self.tags = tags or []
-        self.url = url
-    
-    @classmethod
-    def from_class_info(cls, class_info: Dict[str, Any], date: datetime.date) -> 'CalendarEvent':
-        """Create a CalendarEvent from class information"""
-        # Parse time strings (e.g., "14:00 - 15:15 pm")
-        time_parts = class_info.get("time", "").split(" - ")
-        start_time = None
-        end_time = None
-        
-        if len(time_parts) == 2:
-            # Convert to ISO format for consistency
-            try:
-                # Parse start time
-                start_str = time_parts[0].strip()
-                if "pm" in start_str.lower() and not start_str.startswith("12"):
-                    hour = int(start_str.split(":")[0]) + 12
-                    start_str = f"{hour}:{start_str.split(':')[1].split(' ')[0]}"
-                else:
-                    start_str = start_str.split(' ')[0]
-                
-                # Parse end time
-                end_str = time_parts[1].strip()
-                if "pm" in end_str.lower() and not end_str.startswith("12"):
-                    hour = int(end_str.split(":")[0]) + 12
-                    end_str = f"{hour}:{end_str.split(':')[1].split(' ')[0]}"
-                else:
-                    end_str = end_str.split(' ')[0]
-                
-                # Create ISO format datetime strings
-                start_time = f"{date.isoformat()}T{start_str}:00"
-                end_time = f"{date.isoformat()}T{end_str}:00"
-            except Exception as e:
-                print(f"Error parsing class time: {e}")
-        
-        return cls(
-            title=f"{class_info.get('name')} ({class_info.get('code')})",
-            start_time=start_time,
-            end_time=end_time,
-            location=class_info.get("location"),
-            description=f"Professor: {class_info.get('professor')}",
-            event_type="class"
-        )
-    
-    @classmethod
-    def from_notion_event(cls, notion_event: Dict[str, Any]) -> 'CalendarEvent':
-        """Create a CalendarEvent from a Notion event"""
-        return cls(
-            title=notion_event.get("title", "Untitled Event"),
-            start_time=notion_event.get("start_time"),
-            end_time=notion_event.get("end_time"),
-            location=notion_event.get("location"),
-            description=notion_event.get("description"),
-            event_type="event",
-            all_day=notion_event.get("all_day", False),
-            tags=notion_event.get("tags", []),
-            url=notion_event.get("url")
-        )
-    
-    def format_time(self) -> str:
-        """Format the event time for conversational display"""
-        if not self.start_time:
-            return "time not specified"
-            
-        if self.all_day:
-            return "all day"
-            
-        try:
-            # Parse ISO datetime
-            start_dt = datetime.datetime.fromisoformat(self.start_time)
-            
-            # Format hour without leading zero and handle special cases
-            hour = start_dt.hour
-            if hour == 0:
-                hour_str = "midnight"
-            elif hour == 12:
-                hour_str = "noon"
-            elif hour > 12:
-                hour_str = f"{hour - 12}"
-            else:
-                hour_str = f"{hour}"
-                
-            # Only add minutes if not on the hour
-            if start_dt.minute == 0:
-                if hour not in [0, 12]:  # Not midnight or noon
-                    am_pm = "am" if hour < 12 else "pm"
-                    start_str = f"{hour_str} {am_pm}"
-                else:
-                    start_str = hour_str  # Just "midnight" or "noon"
-            else:
-                am_pm = "am" if hour < 12 else "pm"
-                start_str = f"{hour_str}:{start_dt.minute:02d} {am_pm}"
-            
-            if self.end_time:
-                try:
-                    end_dt = datetime.datetime.fromisoformat(self.end_time)
-                    
-                    # Only include end time if it's not the same day or if it matters
-                    if start_dt.date() != end_dt.date():
-                        return f"{start_str} today until {end_dt.strftime('%A')}"
-                    else:
-                        # Format hour without leading zero
-                        hour = end_dt.hour
-                        if hour == 0:
-                            hour_str = "midnight"
-                        elif hour == 12:
-                            hour_str = "noon"
-                        elif hour > 12:
-                            hour_str = f"{hour - 12}"
-                        else:
-                            hour_str = f"{hour}"
-                            
-                        # Only add minutes if not on the hour
-                        if end_dt.minute == 0:
-                            if hour not in [0, 12]:  # Not midnight or noon
-                                am_pm = "am" if hour < 12 else "pm"
-                                end_str = f"{hour_str} {am_pm}"
-                            else:
-                                end_str = hour_str  # Just "midnight" or "noon"
-                        else:
-                            am_pm = "am" if hour < 12 else "pm"
-                            end_str = f"{hour_str}:{end_dt.minute:02d} {am_pm}"
-                        
-                        return f"{start_str} to {end_str}"
-                except:
-                    return start_str
-            else:
-                return start_str
-        except Exception:
-            # Fall back to raw strings if parsing fails
-            if self.end_time:
-                return f"{self.start_time} to {self.end_time}"
-            return str(self.start_time)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary representation"""
-        return {
-            "title": self.title,
-            "time": self.format_time(),
-            "location": self.location,
-            "description": self.description,
-            "type": self.event_type,
-            "all_day": self.all_day,
-            "tags": self.tags,
-            "url": self.url
-        }
+# Import the shared calendar models
+from core.services.calendar_models import CalendarEvent, CalendarDay
 
-class CalendarDay:
-    """Represents a full day of events"""
-    
-    def __init__(self, date: datetime.date):
-        self.date = date
-        self.events = []
-    
-    def add_event(self, event: CalendarEvent):
-        """Add an event to this day"""
-        self.events.append(event)
-    
-    def get_sorted_events(self) -> List[CalendarEvent]:
-        """Get events sorted by start time"""
-        def get_sort_key(event):
-            if not event.start_time:
-                return "Z"  # Sort events without times last
-            return event.start_time
-            
-        return sorted(self.events, key=get_sort_key)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary representation"""
-        return {
-            "date": self.date.isoformat(),
-            "weekday": self.date.strftime("%A"),
-            "events": [event.to_dict() for event in self.get_sorted_events()]
-        }
+
 
 class CalendarService:
     """Service for managing and querying calendar events"""
@@ -225,17 +39,26 @@ class CalendarService:
         self.google_calendar = None
         if GoogleCalendarService is not None:
             try:
-                # Try multiple times to initialize Google Calendar service
-                for attempt in range(3):
-                    self.google_calendar = GoogleCalendarService()
-                    if self.google_calendar.is_available():
-                        print("✅ Using Google Calendar as primary calendar source")
-                        break
-                    else:
-                        print(f"⚠️  Attempt {attempt+1}/3: Google Calendar service not available, retrying...")
+                print("🔄 Initializing Google Calendar service...")
+                self.google_calendar = GoogleCalendarService()
+                print(f"GoogleCalendarService instance created: {self.google_calendar}")
+                
+                # Check if the service is available
+                if self.google_calendar and self.google_calendar.is_available():
+                    print("✅ Using Google Calendar as primary calendar source")
+                else:
+                    print("⚠️  Google Calendar service initialized but not available")
+                    print(f"   self.google_calendar: {self.google_calendar}")
+                    if self.google_calendar:
+                        print(f"   is_available(): {self.google_calendar.is_available()}")
+                    # Don't set to None yet, let's see what happens when we try to use it
             except Exception as e:
                 print(f"⚠️  Could not initialize Google Calendar service: {e}")
+                import traceback
+                traceback.print_exc()
                 self.google_calendar = None
+        else:
+            print("❌ GoogleCalendarService is None (import failed)")
         
         # Initialize Notion client but don't use it for calendar data
         # We keep this initialization for backward compatibility
@@ -309,22 +132,34 @@ class CalendarService:
                 day.add_event(activity_event)
         
         # Add Google Calendar events if available
-        if self.google_calendar and self.google_calendar.is_available():
-            # Use the Google Calendar service to get events
-            google_events = self.google_calendar.get_calendar_events(date)
-            for event in google_events:
-                google_event = CalendarEvent(
-                    title=event.get('title', 'Untitled Event'),
-                    start_time=event.get('start_time'),
-                    end_time=event.get('end_time'),
-                    location=event.get('location'),
-                    description=event.get('description'),
-                    event_type='event',
-                    all_day=event.get('all_day', False),
-                    tags=[],
-                    url=event.get('url')
-                )
-                day.add_event(google_event)
+        if self.google_calendar:
+            try:
+                if self.google_calendar.is_available():
+                    print(f"Google Calendar is available, getting events for {date}")
+                    # Use the Google Calendar service to get events
+                    google_events = self.google_calendar.get_calendar_events(date)
+                    print(f"Found {len(google_events)} Google Calendar events")
+                    for event in google_events:
+                        print(f"Processing Google event: {event}")
+                        google_event = CalendarEvent(
+                            title=event.get('title', 'Untitled Event'),
+                            start_time=event.get('start_time'),
+                            end_time=event.get('end_time'),
+                            location=event.get('location'),
+                            description=event.get('description'),
+                            event_type='event',
+                            all_day=event.get('all_day', False),
+                            tags=[],
+                            url=event.get('url')
+                        )
+                        day.add_event(google_event)
+                        print(f"Added Google Calendar event: {event.get('title', 'Untitled Event')}")
+                else:
+                    print(f"Google Calendar service exists but is_available() returned False")
+            except Exception as e:
+                print(f"Error accessing Google Calendar: {e}")
+        else:
+            print(f"Google Calendar service not initialized")
         
         # We no longer use Notion for calendar data
         # This section is commented out to preserve the code for reference
@@ -350,6 +185,40 @@ class CalendarService:
         """Get the schedule for the next 7 days"""
         today = datetime.date.today()
         return [self.get_day_schedule(today + datetime.timedelta(days=i)) for i in range(7)]
+        
+    def get_rest_of_day_schedule(self) -> List[CalendarEvent]:
+        """Get events for the rest of the current day"""
+        today = datetime.date.today()
+        now = datetime.datetime.now()
+        
+        # Get today's schedule
+        day = self.get_day_schedule(today)
+        events = day.get_sorted_events()
+        
+        # Filter for events that haven't started yet or are currently ongoing
+        upcoming_events = []
+        for event in events:
+            try:
+                if event.start_time:
+                    # Parse the event start time
+                    event_start = datetime.datetime.fromisoformat(event.start_time)
+                    
+                    # Convert both times to timezone-naive for comparison
+                    if event_start.tzinfo is not None:
+                        # Remove timezone info for comparison
+                        event_start = event_start.replace(tzinfo=None)
+                    
+                    # Include events that start in the future or are currently ongoing
+                    if event_start >= now:
+                        upcoming_events.append(event)
+                else:
+                    # Events without start time are excluded (they're usually all-day events that don't need time filtering)
+                    pass
+            except (ValueError, TypeError):
+                # If we can't parse the time, exclude the event to be safe
+                pass
+        
+        return upcoming_events
     
     def format_day_schedule(self, day: CalendarDay) -> str:
         """Format a day's schedule for conversational response"""
@@ -381,6 +250,57 @@ class CalendarService:
         else:
             # For multiple events, create a more flowing response
             response = f"For {day_name}, you have {len(events)} events: "
+            
+            for i, event in enumerate(events):
+                time_str = event.format_time()
+                location_str = f" at {event.location}" if event.location else ""
+                
+                # Extract just the course name from the title (remove code in parentheses)
+                title = event.title
+                if "(" in title and ")" in title:
+                    title = title.split("(")[0].strip()
+                
+                # Add appropriate transition words
+                if i == 0:
+                    response += f"{title} at {time_str}{location_str}"
+                elif i == len(events) - 1:
+                    response += f", and finally {title} at {time_str}{location_str}."
+                else:
+                    response += f", then {title} at {time_str}{location_str}"
+            
+            return response
+    
+    def format_rest_of_day_schedule(self) -> str:
+        """Format the rest of day's schedule for conversational response"""
+        events = self.get_rest_of_day_schedule()
+        
+        # Get current time period (morning, afternoon, evening, night)
+        hour = datetime.datetime.now().hour
+        if 5 <= hour < 12:
+            time_period = "day"
+        elif 12 <= hour < 17:
+            time_period = "day"
+        elif 17 <= hour < 20:
+            time_period = "evening"
+        else:
+            time_period = "night"
+        
+        if not events:
+            return f"You have nothing scheduled for the rest of the {time_period}."
+        
+        # Create a conversational response
+        if len(events) == 1:
+            event = events[0]
+            time_str = event.format_time()
+            location_str = f" at {event.location}" if event.location else ""
+            
+            if event.event_type == "class":
+                return f"You have {event.title} at {time_str}{location_str} today."
+            else:
+                return f"You have {event.title} scheduled at {time_str}{location_str} today."
+        else:
+            # For multiple events, create a more flowing response
+            response = f"For the rest of the {time_period}, you have {len(events)} events: "
             
             for i, event in enumerate(events):
                 time_str = event.format_time()

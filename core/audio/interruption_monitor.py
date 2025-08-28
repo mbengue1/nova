@@ -144,6 +144,34 @@ class InterruptionMonitor:
             self.is_monitoring = False  # Force state to not monitoring even on error
             return False
     
+    def cleanup(self):
+        """Clean up all resources and ensure proper shutdown"""
+        try:
+            # Stop monitoring if active
+            if self.is_monitoring:
+                self.stop_monitoring()
+            
+            # Ensure thread is stopped
+            if self.monitor_thread and self.monitor_thread.is_alive():
+                self.monitor_thread.join(timeout=2.0)
+                if self.monitor_thread.is_alive():
+                    print("⚠️ Interruption monitor thread did not stop gracefully")
+            
+            # Clear all references
+            self.monitor_thread = None
+            self.stop_event = None
+            self.interruption_event = None
+            self.interruption_callback = None
+            
+            # Clear audio buffers
+            self.energy_history = []
+            self.pre_buffer = []
+            self.capture_buffer = []
+            
+            print("🔇 Interruption monitor cleanup complete")
+        except Exception as e:
+            print(f"⚠️ Error during interruption monitor cleanup: {e}")
+    
     def _monitor_audio(self):
         """Monitor audio for interruptions in a separate thread"""
         try:

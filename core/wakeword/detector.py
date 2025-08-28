@@ -135,9 +135,34 @@ class WakeWordDetector:
     
     def cleanup(self):
         """Clean up resources"""
-        self.stop_listening()
-        if self.porcupine:
-            self.porcupine.delete()
+        try:
+            # Stop listening if active
+            self.stop_listening()
+            
+            # Clean up Porcupine instance
+            if self.porcupine:
+                try:
+                    self.porcupine.delete()
+                    self.porcupine = None
+                except Exception as e:
+                    print(f"⚠️ Error deleting Porcupine instance: {e}")
+            
+            # Clean up audio resources
+            if hasattr(self, 'audio'):
+                try:
+                    if self.audio:
+                        self.audio.terminate()
+                        self.audio = None
+                except Exception as e:
+                    print(f"⚠️ Error terminating audio: {e}")
+            
+            # Clear callback reference
+            if hasattr(self, 'wake_word_callback'):
+                self.wake_word_callback = None
+            
+            print("🔇 Wake word detector cleanup complete")
+        except Exception as e:
+            print(f"⚠️ Error during wake word detector cleanup: {e}")
 
 class PushToTalkDetector:
     """Simple push-to-talk fallback when wake word isn't available"""
@@ -171,3 +196,23 @@ class PushToTalkDetector:
         """Stop listening for input"""
         self.is_listening = False
         print("🔇 Push-to-talk stopped")
+    
+    def cleanup(self):
+        """Clean up resources"""
+        try:
+            # Stop listening if active
+            self.stop_listening()
+            
+            # Ensure input thread is stopped
+            if self.input_thread and self.input_thread.is_alive():
+                self.input_thread.join(timeout=2.0)
+                if self.input_thread.is_alive():
+                    print("⚠️ Push-to-talk input thread did not stop gracefully")
+            
+            # Clear references
+            self.input_thread = None
+            self.speak_callback = None
+            
+            print("🔇 Push-to-talk cleanup complete")
+        except Exception as e:
+            print(f"⚠️ Error during push-to-talk cleanup: {e}")

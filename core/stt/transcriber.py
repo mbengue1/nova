@@ -692,9 +692,32 @@ class SpeechTranscriber:
     
     def cleanup(self):
         """Clean up resources"""
-        self.stop_recording()
-        # sounddevice doesn't need explicit cleanup
-        pass
+        try:
+            # Stop recording if active
+            self.stop_recording()
+            
+            # Clear VAD state
+            if hasattr(self, '_vad_state'):
+                self._vad_state = None
+            
+            # Clear audio buffers
+            if hasattr(self, '_inbuf'):
+                self._inbuf.clear()
+            
+            if hasattr(self, 'audio_frames'):
+                self.audio_frames.clear()
+            
+            # Clear VAD instance
+            if hasattr(self, 'vad'):
+                self.vad = None
+            
+            # Clear Whisper model reference (let Python handle cleanup)
+            if hasattr(self, 'whisper_model'):
+                self.whisper_model = None
+            
+            print("🔇 STT cleanup complete")
+        except Exception as e:
+            print(f"⚠️ Error during STT cleanup: {e}")
     
     def _on_audio(self, indata, frames, time, status):
         """Audio callback with buffer-slice pattern"""

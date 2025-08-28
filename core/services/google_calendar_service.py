@@ -20,7 +20,7 @@ from googleapiclient.discovery import build
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.config import config
-from core.services.calendar_service import CalendarEvent, CalendarDay
+from core.services.calendar_models import CalendarEvent, CalendarDay
 
 # Define the scopes needed for Google Calendar API
 # Read-only access to calendar events

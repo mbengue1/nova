@@ -241,3 +241,17 @@ class AzureSpeechSynthesizer:
     def get_speaking_status(self) -> bool:
         """Check if currently speaking"""
         return self.is_speaking
+    
+    def cleanup(self):
+        """Clean up Azure TTS resources"""
+        self.stop_speaking()
+        
+        # Clean up speech config
+        if self.speech_config:
+            try:
+                # Azure speech config doesn't have explicit cleanup, but we can clear references
+                self.speech_config = None
+            except Exception as e:
+                print(f"⚠️ Error cleaning up Azure speech config: {e}")
+        
+        print("🔇 Azure TTS cleanup complete")

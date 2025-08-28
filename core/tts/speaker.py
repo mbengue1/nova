@@ -163,7 +163,38 @@ class SpeechSynthesizer:
             except:
                 pass
         
+        # stop interruption monitor if active
+        if self.interruption_monitor and hasattr(self.interruption_monitor, 'is_monitoring'):
+            try:
+                if self.interruption_monitor.is_monitoring:
+                    self.interruption_monitor.stop_monitoring()
+            except Exception as e:
+                print(f"⚠️ Error stopping interruption monitor: {e}")
+        
         print("🔇 Speech stopped")
+    
+    def cleanup(self):
+        """Clean up all resources"""
+        self.stop_speaking()
+        
+        # Clean up interruption monitor
+        if self.interruption_monitor:
+            try:
+                if hasattr(self.interruption_monitor, 'stop_monitoring'):
+                    self.interruption_monitor.stop_monitoring()
+                if hasattr(self.interruption_monitor, 'cleanup'):
+                    self.interruption_monitor.cleanup()
+            except Exception as e:
+                print(f"⚠️ Error cleaning up interruption monitor: {e}")
+        
+        # Clean up Azure TTS
+        if self.azure_tts and hasattr(self.azure_tts, 'cleanup'):
+            try:
+                self.azure_tts.cleanup()
+            except Exception as e:
+                print(f"⚠️ Error cleaning up Azure TTS: {e}")
+        
+        print("🔇 TTS cleanup complete")
     
     def is_currently_speaking(self) -> bool:
         """Check if currently speaking"""

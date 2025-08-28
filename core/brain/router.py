@@ -64,10 +64,19 @@ class NovaBrain:
         """Initialize skill instances"""
         # Import skills only when needed to avoid circular imports
         from core.skills.notes_skill import NotesSkill
+        from core.skills.focus_skill import FocusSkill
+        from core.skills.spotify_skill import SpotifySkill
+        from core.services.app_control_service import AppControlService
+        from core.services.spotify_service import SpotifyService
+        
+        # Create shared services
+        app_control_service = AppControlService()
         
         # Store skill instances
         self.skill_instances = {
-            'notes': NotesSkill()
+            'notes': NotesSkill(),
+            'focus': FocusSkill(app_control_service),
+            'spotify': SpotifySkill(SpotifyService())
         }
     
     def _setup_skill_patterns(self):
@@ -147,6 +156,69 @@ class NovaBrain:
                 r'\b(find|search\s+for|look\s+for)\s+(my\s+)?(note|notes)\b',
                 r'\b(find|search\s+for|look\s+for)\s+(.*)\s+(in|from)\s+(my\s+)?(note|notes)\b',
                 r'\b(show|list|display)\s+(my\s+)?(note|notes|all\s+notes)\b'
+            ],
+            'focus': [
+                # Enable DND patterns
+                r'\b(enable|turn\s+on|activate|set)\s+(do\s+not\s+disturb|dnd)\b',
+                
+                # Disable DND patterns
+                r'\b(disable|turn\s+off|deactivate)\s+(do\s+not\s+disturb|dnd)\b',
+                
+                # Toggle DND patterns
+                r'\b(toggle|switch)\s+(do\s+not\s+disturb|dnd)\b',
+                
+                # Get focus patterns
+            ],
+            'spotify': [
+                # Play music commands
+                r'\b(play|start)\s+(?:some\s+)?(?:music|tunes?)\b',
+                r'\b(play|start)\s+(?:my\s+)?(?:playlist\s+)?([a-zA-Z0-9\s\-_]+?)(?:\s+playlist)?(?:\s+on\s+spotify)?\b',
+                r'\b(play|start)\s+(?:the\s+)?([a-zA-Z0-9\s\-_]+?)(?:\s+playlist)?(?:\s+on\s+spotify)?\b',
+                
+                # Playback control
+                r'\b(pause|stop|resume|next|previous|skip)\s+(?:the\s+)?(?:music|track|song)\b',
+                r'\b(volume|louder|quieter|softer)\b',
+                r'\bset\s+volume\s+to\s+\d+%?\b',
+                
+                # Information requests
+                r'\bwhat(?:\'s|\s+is)\s+(?:currently\s+)?playing\b',
+                r'\bwhat\s+playlists?\s+do\s+i\s+have\b',
+                r'\bshow\s+me\s+my\s+playlists?\b',
+                
+                # Context music
+                r'\bplay\s+something\s+(?:relaxing|energetic|calm|chill)\b',
+                r'\bplay\s+music\s+for\s+(?:studying|working\s+out|background)\b',
+                r'\bi\s+need\s+(?:some\s+)?background\s+music\b',
+                
+                # Help and general
+                r'\b(?:can\s+you|do\s+you\s+know\s+how\s+to)\s+(?:play\s+music|control\s+spotify)\b',
+                r'\bhelp\s+me\s+with\s+music\b',
+                r'\bmusic\s+help\b'
+            ],
+            'focus': [
+                # Enable DND patterns
+                r'\b(enable|turn\s+on|activate|set)\s+(do\s+not\s+disturb|dnd)\b',
+                
+                # Disable DND patterns
+                r'\b(disable|turn\s+off|deactivate)\s+(do\s+not\s+disturb|dnd)\b',
+                
+                # Toggle DND patterns
+                r'\b(toggle|switch)\s+(do\s+not\s+disturb|dnd)\b',
+                
+                # Get focus patterns
+                r'\b(what(?:\'s)?|which|get|check|is)\s+(my|the|if)?\s+(focus\s+mode|current\s+focus|do\s+not\s+disturb|dnd)\b',
+                
+                # Set focus patterns
+                r'\b(set|change|switch)\s+(my|the)\s+focus\s+(to|mode)\b',
+                
+                # Private mode patterns
+                r'\b(set|enable|turn\s+on)\s+(private\s+mode|privacy\s+mode|home\s+to\s+private)\b',
+                
+                # Set home/mode to DND patterns
+                r'\b(set)\s+(home|mode|mac|macbook)\s+(to)\s+(do\s+not\s+disturb|dnd)\b',
+                
+                # Disable all focus patterns
+                r'\b(disable|turn\s+off|deactivate)\s+(all|every)\s+(focus|mode)\b'
             ],
             'math': [
                 r'\b(calculate|compute|what\s+is|math|add|subtract|multiply|divide|plus|minus|times|divided\s+by)\b',
@@ -314,6 +386,14 @@ class NovaBrain:
                 # Handle notes requests
                 print("📝 Handling notes request")
                 return self._handle_notes(user_input)
+            elif skill_name == 'focus':
+                # Handle focus mode requests
+                print("🌙 Handling focus mode request")
+                return self._handle_focus(user_input)
+            elif skill_name == 'spotify':
+                # Handle Spotify requests
+                print("🎵 Handling Spotify request")
+                return self._handle_spotify(user_input)
             elif skill_name == 'math':
                 # COMMENTED OUT: Local math skills replaced with OpenAI LLM
                 # return self._handle_math(user_input)
@@ -524,6 +604,28 @@ class NovaBrain:
             from core.skills.notes_skill import NotesSkill
             notes_skill = NotesSkill()
             return notes_skill.handle_query(user_input)
+            
+    def _handle_focus(self, user_input: str) -> str:
+        """Handle focus mode-related requests using the FocusSkill"""
+        if 'focus' in self.skill_instances:
+            return self.skill_instances['focus'].process(user_input)
+        else:
+            # Fallback if skill instance not available
+            from core.skills.focus_skill import FocusSkill
+            from core.services.app_control_service import AppControlService
+            focus_skill = FocusSkill(AppControlService())
+            return focus_skill.process(user_input)
+    
+    def _handle_spotify(self, user_input: str) -> str:
+        """Handle Spotify-related requests using the SpotifySkill"""
+        if 'spotify' in self.skill_instances:
+            return self.skill_instances['spotify'].process(user_input)
+        else:
+            # Fallback if skill instance not available
+            from core.skills.spotify_skill import SpotifySkill
+            from core.services.spotify_service import SpotifyService
+            spotify_skill = SpotifySkill(SpotifyService())
+            return spotify_skill.process(user_input)
     
     # def _handle_notion(self, user_input: str) -> str:
     #     """Handle Notion-related requests (deprecated)"""
