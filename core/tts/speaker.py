@@ -4,8 +4,20 @@ Provides natural speech output for Nova's responses
 """
 import subprocess
 import platform
+import threading
+import queue
+import os
+import re
+import time
 from typing import Optional
 from config import config
+
+# Import the new interruption monitor
+try:
+    from core.audio.interruption_monitor import InterruptionMonitor
+except ImportError:
+    print("⚠️ InterruptionMonitor not available - falling back to basic interruption detection")
+    InterruptionMonitor = None
 
 class SpeechSynthesizer:
     """Handles text-to-speech using macOS voices or Azure (if available)"""
@@ -15,6 +27,28 @@ class SpeechSynthesizer:
         self.available_voices = self._get_available_voices()
         self.is_speaking = False
         self.current_speech_process = None
+        self.interrupt_listener = None
+        self.was_interrupted = False
+        self.sample_rate = 16000  # Standard sample rate for audio processing
+        
+        # Queue-based approach for interruption
+        self.audio_output_queue = queue.Queue()
+        self.should_stop_speaking = threading.Event()
+        
+        # Initialize the dedicated interruption monitor if available
+        self.interruption_monitor = None
+        if InterruptionMonitor is not None:
+            try:
+                self.interruption_monitor = InterruptionMonitor(
+                    sample_rate=self.sample_rate,
+                    energy_threshold=0.012,  # Balanced sensitivity
+                    min_duration_ms=40,      # Slightly longer to avoid false positives
+                    consecutive_frames=2,    # Require 2 frames for better reliability
+                    speech_validation_window=8  # Shorter window for faster validation
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to initialize interruption monitor: {e}")
+                self.interruption_monitor = None
         
         # attempt to initialize azure tts for high quality speech
         self.azure_tts = None
@@ -134,6 +168,140 @@ class SpeechSynthesizer:
     def is_currently_speaking(self) -> bool:
         """Check if currently speaking"""
         return self.is_speaking
+        
+    def speak_with_interruption(self, text: str, stt, voice: str = None, rate: float = None, pitch: float = None) -> bool:
+        """Speak text with interruption capability using dedicated interruption monitor
+        
+        Args:
+            text: Text to speak
+            stt: SpeechTranscriber instance for interruption detection (kept for backward compatibility)
+            voice, rate, pitch: TTS parameters
+            
+        Returns:
+            bool: True if speech completed, False if interrupted or failed
+        """
+        if not text.strip():
+            return False
+            
+        # Stop any current speech before starting a new one
+        if self.is_currently_speaking():
+            self.stop_speaking()
+        
+        # Clean text for more natural speech
+        cleaned_text = self._clean_text_for_speech(text)
+        
+        # Reset interruption flag
+        self.was_interrupted = False
+        
+        # Define the interruption handler
+        def on_interruption():
+            print("🛑 INTERRUPTION DETECTED! Stopping speech immediately...")
+            self.was_interrupted = True
+            
+            # Force immediate stop
+            if self.azure_tts and self.azure_tts.is_available():
+                self.azure_tts.stop_speaking()
+            
+            # Also call the general stop_speaking method
+            self.stop_speaking()
+            
+        # Start the interruption monitor if available
+        using_dedicated_monitor = False
+        if self.interruption_monitor is not None:
+            try:
+                # Make sure to stop any existing monitor first for clean restart
+                if self.interruption_monitor.is_monitoring:
+                    self.interruption_monitor.stop_monitoring()
+                    time.sleep(0.1)  # Small delay to ensure clean restart
+                
+                print("🎤 Starting dedicated interruption monitor...")
+                if self.interruption_monitor.start_monitoring(on_interruption=on_interruption):
+                    using_dedicated_monitor = True
+                    print("✅ Dedicated interruption monitor active")
+                else:
+                    print("⚠️ Failed to start dedicated interruption monitor - falling back to legacy method")
+            except Exception as e:
+                print(f"⚠️ Error starting interruption monitor: {e} - falling back to legacy method")
+                
+        # If dedicated monitor failed, fall back to legacy method
+        if not using_dedicated_monitor:
+            # Start legacy interruption detection in a separate thread
+            def legacy_interruption_listener():
+                try:
+                    print("👂 Using legacy interruption detection...")
+                    
+                    import numpy as np
+                    import sounddevice as sd
+                    
+                    # Use a sliding window for energy detection
+                    window_size = 10  # Number of frames to keep in history
+                    energy_history = []
+                    baseline_energy = None
+                    
+                    while self.is_speaking:
+                        # Record a very short audio sample
+                        duration = 0.05  # 50ms - extremely short for responsiveness
+                        samples = int(self.sample_rate * duration)
+                        recording = sd.rec(samples, samplerate=self.sample_rate, channels=1, dtype='int16')
+                        sd.wait()
+                        
+                        # Convert to float and calculate energy
+                        audio_float = recording.flatten().astype(np.float32) / 32768.0
+                        energy = np.sqrt(np.mean(audio_float**2))
+                        
+                        # Add to history
+                        energy_history.append(energy)
+                        if len(energy_history) > window_size:
+                            energy_history.pop(0)
+                        
+                        # Establish baseline if not yet set
+                        if baseline_energy is None and len(energy_history) >= 5:
+                            baseline_energy = sum(energy_history) / len(energy_history)
+                            print(f"📊 Baseline energy: {baseline_energy:.6f}")
+                        
+                        # Check for significant energy increase over baseline
+                        if baseline_energy is not None:
+                            # Calculate current average
+                            current_avg = sum(energy_history[-3:]) / 3 if len(energy_history) >= 3 else energy
+                            
+                            # If energy is significantly higher than baseline, consider it an interruption
+                            if current_avg > baseline_energy * 2.5 or current_avg > 0.015:
+                                print(f"🛑 INTERRUPTION DETECTED! Energy: {current_avg:.6f} (baseline: {baseline_energy:.6f})")
+                                on_interruption()
+                                break
+                        
+                        # Very short sleep for responsiveness
+                        time.sleep(0.01)
+                        
+                except Exception as e:
+                    print(f"Legacy interruption listener error: {e}")
+            
+            # Start the legacy interruption detection thread
+            self.interrupt_listener = threading.Thread(target=legacy_interruption_listener, daemon=True)
+            self.interrupt_listener.start()
+        
+        print("\n" + "="*60)
+        print("🔊 INTERRUPTION DETECTION ACTIVE - speak anytime to interrupt Nova")
+        print("🎤 Using " + ("dedicated" if using_dedicated_monitor else "legacy") + " interruption monitor")
+        print("="*60 + "\n")
+        
+        # Speak the text
+        self.is_speaking = True
+        
+        if self.azure_tts and self.azure_tts.is_available():
+            result = self.azure_tts.speak(cleaned_text, voice, rate, pitch)
+        else:
+            result = self.speak(cleaned_text, voice, rate, pitch)
+        
+        # Stop the interruption monitor
+        if using_dedicated_monitor:
+            self.interruption_monitor.stop_monitoring()
+        elif self.interrupt_listener:
+            self.interrupt_listener.join(timeout=1.0)
+            self.interrupt_listener = None
+        
+        self.is_speaking = False
+        return result and not self.was_interrupted
     
     def _speak_macos(self, text: str, voice: str, rate: float, pitch: float) -> bool:
         """Speak text using macOS 'say' command"""

@@ -15,11 +15,12 @@ Future stages will expand to Windows, iPhone, and cross-device operation, with p
 
 ## 🎯 MVP Goals
 
-* Respond to **wake word**: “Hey Nova”
+* Respond to **wake word**: "Hey Nova"
 * Capture speech, transcribe with **Whisper**
 * Route to **skills** (Notion, app control, math, system info)
 * Fallback to **LLM (OpenAI API)** for natural conversation
 * Speak back using **macOS TTS** (British, American, or custom neural voices)
+* Support **barge-in capability** (interrupt Nova while speaking)
 * Run in **Terminal** as a simple service
 
 ---
@@ -47,7 +48,7 @@ Future stages will expand to Windows, iPhone, and cross-device operation, with p
      * **LLM (OpenAI GPT)** for conversation
    * Ensures replies are dynamic, not scripted
 
-4. **TTS (Speech Output)**
+4. **TTS (Speech Output) & Interruption**
 
    * Default: macOS `AVSpeechSynthesizer` or `say` command (built-in voices)
    * Configurable for British/futuristic tones

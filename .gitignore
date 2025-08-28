@@ -41,11 +41,12 @@ Thumbs.db
 logs/
 temp/
 
-# Audio files (if any are generated) - keeping these for demo purposes
-# *.wav
-# *.mp3
-# *.m4a
-# *.flac
+# Audio files
+*.wav
+*.mp3
+*.m4a
+*.flac
+interruption_*.wav  # Interruption audio files
 
 # Configuration files with sensitive data
 config.json

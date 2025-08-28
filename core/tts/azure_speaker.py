@@ -15,6 +15,7 @@ class AzureSpeechSynthesizer:
         self.voice_name = "en-GB-LibbyNeural"  # British female voice
         self.is_speaking = False
         self.current_synthesizer = None
+        self.cancellation_token = None  # For cancelling speech synthesis
         
         # initialize azure speech configuration
         try:
@@ -75,12 +76,24 @@ class AzureSpeechSynthesizer:
                 # azure rate: 0.5 = slow, 2.0 = fast
                 self.speech_config.speech_synthesis_speaking_rate = rate
             
-            # create speech synthesizer instance
+            # We don't need to create a CancellationDetails object directly
+            self.cancellation_token = None
+            
+            # Create an audio output config that can be cancelled
+            audio_config = speechsdk.audio.AudioOutputConfig(use_default_speaker=True)
+            
+            # Create speech synthesizer instance with cancellation support
             speech_synthesizer = speechsdk.SpeechSynthesizer(
-                speech_config=self.speech_config
+                speech_config=self.speech_config,
+                audio_config=audio_config
             )
             
-            # track speaking state
+            # Set up cancellation handling
+            speech_synthesizer.synthesis_canceled.connect(
+                lambda evt: print(f"🛑 Azure TTS synthesis cancelled: {evt}")
+            )
+            
+            # Track speaking state
             self.is_speaking = True
             self.current_synthesizer = speech_synthesizer
             
@@ -204,12 +217,25 @@ class AzureSpeechSynthesizer:
     def stop_speaking(self):
         """Stop current speech immediately"""
         self.is_speaking = False
+        
         if self.current_synthesizer:
             try:
-                # Azure doesn't have a direct stop method, but we can mark as stopped
+                # Cancel the current synthesis
+                self.current_synthesizer.stop_speaking_async()
+                
+                # Force stop by creating a new synthesizer (this effectively cancels the previous one)
+                if self.speech_config:
+                    dummy_synthesizer = speechsdk.SpeechSynthesizer(
+                        speech_config=self.speech_config
+                    )
+                    dummy_synthesizer.stop_speaking_async()
+                
+                # Clear the current synthesizer
                 self.current_synthesizer = None
-            except:
+            except Exception as e:
+                print(f"Error stopping Azure TTS: {e}")
                 pass
+        
         print("🔇 Azure TTS stopped")
     
     def get_speaking_status(self) -> bool:

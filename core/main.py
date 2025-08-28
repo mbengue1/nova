@@ -21,7 +21,7 @@ import sys
 import time
 import subprocess
 import os
-from typing import Optional
+from typing import Optional, Dict, Any
 
 # Add the core directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -55,6 +55,16 @@ class HeyNova:
         # system state variables
         self.is_running = False
         self.current_mode = "wake_word"  # or "push_to_talk"
+        
+        # Conversation state tracking
+        self.conversation_state = {
+            "active": False,
+            "last_input": None,
+            "last_response": None,
+            "interruption_count": 0,
+            "last_interruption": None,
+            "greeting_given": False
+        }
         
         # Configure logging verbosity
         self.verbose_logging = False  # Set to True for detailed logs
@@ -130,6 +140,57 @@ class HeyNova:
         if self.tts.is_currently_speaking():
             print("🛑 User interrupted speech - stopping TTS")
             self.tts.stop_speaking()
+            
+            # Check if we have captured audio from the interruption
+            interruption_audio = None
+            if hasattr(self.tts, 'interruption_monitor') and self.tts.interruption_monitor:
+                interruption_audio = self.tts.interruption_monitor.get_interruption_audio_file()
+            
+            if interruption_audio and os.path.exists(interruption_audio):
+                print(f"🎤 Processing interruption audio: {interruption_audio}")
+                
+                # Process the interruption audio with our transcriber
+                try:
+                    # Try up to 2 times to get a valid transcription
+                    max_attempts = 2
+                    interruption_text = None
+                    
+                    # First attempt - use faster transcription for responsiveness
+                    print("🎧 Fast-transcribing interruption audio...")
+                    interruption_text = self.stt.transcribe_file(interruption_audio)
+                    
+                    # If first attempt failed, try again with more careful transcription
+                    if not interruption_text or len(interruption_text.strip()) == 0:
+                        print(f"⚠️ Empty transcription on first attempt, retrying with more careful processing...")
+                        time.sleep(0.1)  # Very short delay
+                        interruption_text = self.stt.transcribe_file(interruption_audio)
+                    
+                    if interruption_text and len(interruption_text.strip()) > 0:
+                        print(f"👤 Interruption: '{interruption_text}'")
+                        
+                        # Process the interruption text immediately
+                        print("🧠 Processing interruption...")
+                        self._process_interruption(interruption_text)
+                    else:
+                        print("⚠️ Empty transcription from interruption audio after multiple attempts")
+                        # Give shorter response for better flow
+                        self._speak_with_fallback("I heard you, but couldn't understand. Could you repeat that?", allow_interruption=True)
+                        # Continue with standard listening
+                        print("🎤 Continuing with standard listening...")
+                        self.stt.reset_state()
+                        self._process_user_input(use_streaming=True)
+                except Exception as e:
+                    print(f"❌ Error processing interruption: {e}")
+                    # Continue with standard listening with minimal response
+                    self._speak_with_fallback("Sorry, could you try again?", allow_interruption=True)
+                    print("🎤 Continuing with standard listening due to error...")
+                    self.stt.reset_state()
+                    self._process_user_input(use_streaming=True)
+            else:
+                print("⚠️ No interruption audio captured, continuing with standard listening")
+                # Continue with standard listening
+                self.stt.reset_state()
+                self._process_user_input(use_streaming=True)
     
     def _welcome_greeting(self):
         """Give personalized welcome greeting"""
@@ -154,12 +215,20 @@ class HeyNova:
             print(f"🎭 {welcome_message}")
             self.tts.speak(welcome_message)
             
+            # Update conversation state
+            self.conversation_state["greeting_given"] = True
+            self.conversation_state["active"] = True
+            
         except Exception as e:
             print(f"Error in welcome greeting: {e}")
             # fallback greeting
             fallback = f"Hello, {config.user_title}! Welcome home. How may I serve you today?"
             print(f"🎭 {fallback}")
             self.tts.speak(fallback)
+            
+            # Update conversation state
+            self.conversation_state["greeting_given"] = True
+            self.conversation_state["active"] = True
     
     def _show_voice_health_hud(self):
         """Display Voice Health HUD with current metrics"""
@@ -256,8 +325,8 @@ class HeyNova:
                     # Add newline after streaming completes
                     print()
                     
-                    # Speak the full response
-                    if not self._speak_with_fallback(full_response):
+                    # Speak the full response with interruption capability
+                    if not self._speak_with_fallback(full_response, allow_interruption=True):
                         print("⚠️  TTS failed")
                 else:
                     # Get full response at once
@@ -266,8 +335,9 @@ class HeyNova:
                     if response:
                         print(f"🤖 Nova: {response}")
                         
-                        # speak response to user with fallback
-                        if not self._speak_with_fallback(response):
+                        # Speak response to user with interruption capability
+                        # Always allow interruption for all responses including calendar
+                        if not self._speak_with_fallback(response, allow_interruption=True):
                             print("⚠️  TTS failed")
                     else:
                         print("⚠️  No response generated")
@@ -302,15 +372,28 @@ class HeyNova:
             print(f"Error processing user input: {e}")
             self._speak_with_fallback("I encountered an error. Please try again.")
             
-    def _speak_with_fallback(self, text: str) -> bool:
-        """Speak text with fallback mechanisms
+    def _speak_with_fallback(self, text: str, allow_interruption: bool = False) -> bool:
+        """Speak text with fallback mechanisms and optional interruption
         
+        Args:
+            text: Text to speak
+            allow_interruption: Whether to allow user interruptions
+            
         Returns:
             bool: True if speech was successful, False otherwise
         """
         if not text:
             return False
-            
+        
+        # Use interruption-capable speaking if requested
+        if allow_interruption:
+            try:
+                return self.tts.speak_with_interruption(text, self.stt)
+            except Exception as interrupt_error:
+                logger.log("tts_error", {"error": str(interrupt_error), "method": "interruption"}, "ERROR")
+                print(f"⚠️  Interruption-capable TTS failed: {interrupt_error}")
+                # Fall back to regular speaking
+        
         # Try Azure TTS first
         try:
             return self.tts.speak(text)
@@ -458,9 +541,19 @@ class HeyNova:
                         # Add newline after streaming completes
                         print()
                         
-                        # Speak the full response with fallback
-                        if not self._speak_with_fallback(full_response):
-                            print("⚠️  TTS failed")
+                        # The interruption capability is now handled in the speaker class
+                        
+                        # Speak the full response with fallback and interruption capability
+                        # Always enable interruption for all responses
+                        if not self._speak_with_fallback(full_response, allow_interruption=True):
+                            if self.tts.was_interrupted:
+                                print("👂 Speech was interrupted, listening for new command...")
+                                # Reset activity timer after interruption
+                                last_activity_time = time.time()
+                                # Skip the rest of this loop iteration to immediately listen
+                                continue
+                            else:
+                                print("⚠️  TTS failed")
                         else:
                             # Reset activity timer after speaking
                             last_activity_time = time.time()
@@ -470,8 +563,18 @@ class HeyNova:
                         
                         if response:
                             print(f"🤖 Nova: {response}")
-                            if not self._speak_with_fallback(response):
-                                print("⚠️  TTS failed")
+                            
+                            # The interruption capability is now handled in the speaker class
+                            
+                            if not self._speak_with_fallback(response, allow_interruption=True):
+                                if self.tts.was_interrupted:
+                                    print("👂 Speech was interrupted, listening for new command...")
+                                    # Reset activity timer after interruption
+                                    last_activity_time = time.time()
+                                    # Skip the rest of this loop iteration to immediately listen
+                                    continue
+                                else:
+                                    print("⚠️  TTS failed")
                             else:
                                 # Reset activity timer after speaking
                                 last_activity_time = time.time()
@@ -517,6 +620,93 @@ class HeyNova:
                 # Reset activity timer after speaking
                 last_activity_time = time.time()
     
+    def _process_interruption(self, interruption_text: str):
+        """Process an interruption from the user
+        
+        Args:
+            interruption_text: The transcribed text from the interruption
+        """
+        # Update interruption tracking
+        self.conversation_state["interruption_count"] += 1
+        self.conversation_state["last_interruption"] = interruption_text
+        
+        # Normalize the text for better command detection
+        normalized_text = interruption_text.lower().strip()
+        
+        # Check for exit commands and shutdown commands
+        exit_commands = ['goodbye', 'exit', 'stop', 'end', 'good night', 'goodnight', 'bye', 'see you']
+        shutdown_commands = ['shut down', 'shutdown', 'power off', 'turn off', 'terminate']
+        
+        # Handle exit commands
+        if any(word in normalized_text for word in exit_commands):
+            print("👋 Ending conversation via interruption, returning to wake word mode...")
+            self._return_to_wake_word_mode("Goodbye! I'll be here when you need me.")
+            return
+        
+        # Handle shutdown commands
+        elif any(cmd in normalized_text for cmd in shutdown_commands):
+            print("🛑 Shutdown command detected via interruption...")
+            self._speak_with_fallback("Shutting down now. Goodbye!")
+            self.is_running = False
+            return
+        
+        # Check for very short or likely misheard interruptions
+        if len(normalized_text.split()) <= 2:
+            # Check if it's a common short command
+            common_short_commands = ['yes', 'no', 'stop', 'wait', 'hey', 'hi', 'ok']
+            question_starters = ['what', 'who', 'when', 'where', 'why', 'how', 'can', 'could', 'will', 'would', 'should', 'is', 'are']
+            
+            if any(cmd == normalized_text for cmd in common_short_commands):
+                # Process common short commands directly
+                print(f"✅ Recognized short command: '{normalized_text}'")
+                # Continue processing
+            elif any(normalized_text.startswith(cmd) for cmd in question_starters):
+                # Continue processing if it starts with a question word
+                print(f"✅ Recognized question starter: '{normalized_text}'")
+                # Continue processing
+            else:
+                # For very short interruptions that aren't commands or questions, ask for clarification
+                print("⚠️ Very short interruption detected, asking for clarification...")
+                self._speak_with_fallback("I heard you interrupt. What would you like to know?", allow_interruption=True)
+                # Continue with standard listening
+                self.stt.reset_state()
+                self._process_user_input(use_streaming=True)
+                return
+        
+        # Process the interruption as a normal request
+        try:
+            # Get streaming response
+            print("🤖 Nova: ", end="", flush=True)
+            
+            # Collect the full response for TTS
+            full_response = ""
+            
+            # Process streaming response
+            for chunk in self.brain.process_input(interruption_text, stream=True):
+                print(chunk, end="", flush=True)
+                full_response += chunk
+            
+            # Add newline after streaming completes
+            print()
+            
+            # Speak the full response with interruption capability
+            if not self._speak_with_fallback(full_response, allow_interruption=True):
+                if self.tts.was_interrupted:
+                    # If this response was interrupted too, let the interrupt handler take over
+                    print("👂 Response was interrupted again, handling new interruption...")
+                    return
+                else:
+                    print("⚠️ TTS failed for interruption response")
+            
+            # After speaking, continue conversation mode
+            self._enter_conversation_mode(use_streaming=True)
+            
+        except Exception as e:
+            print(f"❌ Error processing interruption: {e}")
+            self._speak_with_fallback("I'm sorry, I couldn't process that properly. What else can I help with?", allow_interruption=True)
+            # Continue conversation mode
+            self._enter_conversation_mode(use_streaming=True)
+    
     def _return_to_wake_word_mode(self, message: str = "I'll be listening for 'Hey Nova' when you need me again."):
         """Return to wake word detection mode with a message
         
@@ -528,6 +718,15 @@ class HeyNova:
         
         # Set mode to wake word
         self.current_mode = "wake_word"
+        
+        # Reset conversation state
+        self.conversation_state.update({
+            "active": False,
+            "last_input": None,
+            "last_response": None,
+            "interruption_count": 0,
+            "last_interruption": None
+        })
         
         # Make sure wake word detection is active
         try:

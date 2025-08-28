@@ -100,6 +100,117 @@ class SpeechTranscriber:
     def set_interrupt_callback(self, callback: Callable):
         """Set callback function for handling interrupts"""
         self.interrupt_callback = callback
+        
+    def detect_interruption(self, duration_ms: int = 30) -> bool:
+        """Listen for interruptions for a specified duration
+        
+        Args:
+            duration_ms: How long to listen for interruptions (milliseconds)
+            
+        Returns:
+            bool: True if interruption was detected, False otherwise
+        """
+        import sounddevice as sd
+        import numpy as np
+        import webrtcvad
+        import time
+        
+        # Initialize VAD for interruption detection - most aggressive setting
+        vad = webrtcvad.Vad(3)  # Most aggressive VAD for interruptions
+        
+        # Calculate frames needed based on duration
+        # Use very short frames for faster detection
+        frame_duration_ms = 10  # 10ms frames
+        frame_size = int(self.sample_rate * frame_duration_ms / 1000)
+        num_frames = max(1, int(duration_ms / frame_duration_ms))
+        
+        # Use extremely sensitive detection parameters for half-duplex fallback
+        # We'll accept more false positives to ensure we catch real interruptions
+        energy_threshold = 0.05  # Very low threshold to detect even quiet interruptions
+        
+        # Static variables to maintain state between calls
+        if not hasattr(self, '_interruption_state'):
+            self._interruption_state = {
+                'speech_frames': 0,
+                'energy_frames': 0,
+                'last_frame_energy': 0,
+                'energy_rise': 0,
+                'last_detection_time': 0
+            }
+        
+        # Hysteresis: don't trigger again too soon after a detection
+        current_time = time.time()
+        if (current_time - self._interruption_state['last_detection_time']) < 1.0:
+            # Don't check again for 1 second after a detection
+            return False
+        
+        try:
+            # Open stream for short duration
+            with sd.InputStream(
+                channels=1,
+                samplerate=self.sample_rate,
+                blocksize=frame_size,
+                dtype='int16'
+            ) as stream:
+                for _ in range(num_frames):
+                    # Read audio frame
+                    audio_data, overflowed = stream.read(frame_size)
+                    
+                    # Convert to bytes for VAD
+                    audio_bytes = audio_data.tobytes()
+                    
+                    # Check energy level (for non-speech sounds)
+                    audio_float = audio_data.flatten().astype(np.float32) / 32768.0
+                    frame_energy = np.sqrt(np.mean(audio_float**2))
+                    
+                    # Calculate energy rise (spectral flux simplified)
+                    energy_rise = max(0, frame_energy - self._interruption_state['last_frame_energy'])
+                    self._interruption_state['last_frame_energy'] = frame_energy
+                    self._interruption_state['energy_rise'] += energy_rise
+                    
+                    # Very aggressive energy detection
+                    if frame_energy > energy_threshold:
+                        self._interruption_state['energy_frames'] += 1
+                        if self._interruption_state['energy_frames'] >= 1:  # Just 1 frame above threshold
+                            self._interruption_state['last_detection_time'] = current_time
+                            self._interruption_state['energy_frames'] = 0
+                            print("🛑 Interruption detected (energy)!")
+                            return True
+                    else:
+                        self._interruption_state['energy_frames'] = 0
+                    
+                    # Energy rise detection (onset detection)
+                    if self._interruption_state['energy_rise'] > 0.1:  # Significant rise in energy
+                        self._interruption_state['last_detection_time'] = current_time
+                        self._interruption_state['energy_rise'] = 0
+                        print("🛑 Interruption detected (onset)!")
+                        return True
+                    
+                    # Check if frame contains speech
+                    try:
+                        # Pad the frame if needed (WebRTC VAD requires specific frame sizes)
+                        if len(audio_bytes) < 2 * frame_size:
+                            padding = b'\x00' * (2 * frame_size - len(audio_bytes))
+                            audio_bytes += padding
+                            
+                        is_speech = vad.is_speech(audio_bytes, self.sample_rate)
+                        
+                        if is_speech:
+                            self._interruption_state['speech_frames'] += 1
+                            if self._interruption_state['speech_frames'] >= 1:  # Just 1 frame of speech
+                                self._interruption_state['last_detection_time'] = current_time
+                                self._interruption_state['speech_frames'] = 0
+                                print("🛑 Interruption detected (speech)!")
+                                return True
+                        else:
+                            self._interruption_state['speech_frames'] = 0
+                    except Exception:
+                        pass
+            
+            return False
+        except Exception as e:
+            print(f"Error detecting interruption: {e}")
+            return False
     
     def record_audio_with_vad(self, max_duration: int = None) -> Optional[str]:
         """Record audio using Voice Activity Detection with state machine"""
@@ -531,6 +642,47 @@ class SpeechTranscriber:
     def is_currently_recording(self) -> bool:
         """Check if currently recording"""
         return self.is_recording
+    
+    def transcribe_file(self, file_path: str) -> Optional[str]:
+        """Transcribe an audio file
+        
+        Args:
+            file_path: Path to the audio file to transcribe
+            
+        Returns:
+            str: Transcribed text, or None if transcription failed
+        """
+        if not self.whisper_model:
+            print("⚠️ Whisper model not available for file transcription")
+            return None
+        
+        if not os.path.exists(file_path):
+            print(f"⚠️ Audio file not found: {file_path}")
+            return None
+        
+        try:
+            print(f"🎤 Transcribing audio file: {file_path}")
+            
+            # Process with Whisper
+            segments, info = self.whisper_model.transcribe(
+                file_path,
+                beam_size=5,
+                language="en",
+                vad_filter=True
+            )
+            
+            # Collect all segments
+            transcript = " ".join([segment.text for segment in segments])
+            
+            # Clean up the transcript
+            transcript = transcript.strip()
+            
+            print(f"✅ Transcription complete: '{transcript}'")
+            return transcript
+            
+        except Exception as e:
+            print(f"❌ Error transcribing file: {e}")
+            return None
     
     def reset_state(self):
         """Reset VAD and recording state for clean conversation flow"""
