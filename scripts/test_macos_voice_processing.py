@@ -518,7 +518,7 @@ class MacOSVoiceProcessingDemo:
             print(f"🎤 Capturing {self.audio_capture_duration} seconds of audio after interruption...")
             
             # Create a fixed filename in the current directory
-            self.interruption_audio_file = "interruption_latest.wav"
+            self.interruption_audio_file = "audio_cache/interruption_latest.wav"
             
             # Record audio using a subprocess to avoid segmentation faults
             try:
@@ -535,7 +535,7 @@ import sys
 duration = 3.0  # seconds
 fs = 44100  # sample rate
 channels = 1
-filename = "interruption_latest.wav"
+        filename = "audio_cache/interruption_latest.wav"
 
 print(f"Recording {duration} seconds of audio...")
 recording = sd.rec(int(duration * fs), samplerate=fs, channels=channels, dtype='int16')

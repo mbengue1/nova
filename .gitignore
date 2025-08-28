@@ -46,7 +46,9 @@ temp/
 *.mp3
 *.m4a
 *.flac
-interruption_*.wav  # Interruption audio files
+# Audio cache directory
+audio_cache/
+interruption_*.wav  # Legacy interruption audio files (if any remain)
 
 # Configuration files with sensitive data
 config.json

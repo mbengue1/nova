@@ -7,7 +7,7 @@ import sys
 duration = 3.0  # seconds
 fs = 44100  # sample rate
 channels = 1
-filename = "interruption_latest.wav"
+filename = "audio_cache/interruption_latest.wav"
 
 print(f"Recording {duration} seconds of audio...")
 recording = sd.rec(int(duration * fs), samplerate=fs, channels=channels, dtype='int16')

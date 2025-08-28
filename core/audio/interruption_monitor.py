@@ -301,9 +301,10 @@ class InterruptionMonitor:
         try:
             print(f"🎤 Capturing {self.audio_capture_duration} seconds of audio after interruption...")
             
-            # Create a timestamped filename in the current directory
+            # Create a timestamped filename in the audio cache directory
             timestamp = time.strftime("%Y%m%d-%H%M%S")
-            self.interruption_audio_file = f"interruption_{timestamp}.wav"
+            os.makedirs("audio_cache", exist_ok=True)
+            self.interruption_audio_file = f"audio_cache/interruption_{timestamp}.wav"
             
             # Include pre-buffer audio if available
             pre_buffer_audio = np.concatenate(self.pre_buffer) if self.pre_buffer else np.array([])
@@ -384,9 +385,10 @@ class InterruptionMonitor:
         try:
             print(f"🎤 Saving continuously captured audio ({len(self.capture_buffer)} frames)...")
             
-            # Create a timestamped filename in the current directory
+            # Create a timestamped filename in the audio cache directory
             timestamp = time.strftime("%Y%m%d-%H%M%S")
-            self.interruption_audio_file = f"interruption_{timestamp}.wav"
+            os.makedirs("audio_cache", exist_ok=True)
+            self.interruption_audio_file = f"audio_cache/interruption_{timestamp}.wav"
             
             # Combine pre-buffer and captured audio
             combined_audio = np.concatenate(self.pre_buffer + self.capture_buffer) if self.pre_buffer else np.concatenate(self.capture_buffer)
