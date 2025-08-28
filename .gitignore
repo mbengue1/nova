@@ -140,6 +140,7 @@ nova_logs/
 core/personal_config.py
 personal_config.py
 PERSONALIZATION.md
+commit_message.txt
 
 # Google API credentials
 credentials/client_secret_*.json

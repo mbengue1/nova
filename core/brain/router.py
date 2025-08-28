@@ -56,6 +56,19 @@ class NovaBrain:
         
         # Define skill patterns
         self._setup_skill_patterns()
+        
+        # Initialize skills
+        self._initialize_skills()
+    
+    def _initialize_skills(self):
+        """Initialize skill instances"""
+        # Import skills only when needed to avoid circular imports
+        from core.skills.notes_skill import NotesSkill
+        
+        # Store skill instances
+        self.skill_instances = {
+            'notes': NotesSkill()
+        }
     
     def _setup_skill_patterns(self):
         """Setup patterns for skill detection"""
@@ -115,7 +128,25 @@ class NovaBrain:
             # Redirect Notion queries to calendar skill
             'calendar_redirect': [
                 r'\b(tasks|todo|notion|what\'s\s+on\s+my\s+plate)\b',
-                r'\b(show\s+me\s+my|read\s+my|check\s+my)\s+(tasks|notes)\b'
+                r'\b(show\s+me\s+my|read\s+my|check\s+my)\s+(tasks)\b'
+            ],
+            'notes': [
+                # Create note patterns
+                r'\b(create|make|start|new)\s+(a\s+)?(new\s+)?(note|notes)\b',
+                r'\b(create|make|start|new)\s+(a\s+)?(new\s+)?(note|notes)\s+(called|named|titled|with\s+title)\b',
+                r'\b(create|make|start|new)\s+(a\s+)?(new\s+)?(note|notes)\s+for\b',
+                r'\b(create|make|start|new)\s+(a\s+)?(new\s+)?(shopping\s+list|grocery\s+list|to-do\s+list|todo\s+list)\b',
+                
+                # Add to note patterns
+                r'\badd\s+(to|in|into)\s+(my\s+)?(note|notes|shopping\s+list|grocery\s+list)\b',
+                r'\badd\s+(.*)\s+to\s+(my\s+)?(note|notes|shopping\s+list|grocery\s+list)\b',
+                r'\b(put|place|write|jot\s+down)\s+(.*)\s+(in|into|to)\s+(my\s+)?(note|notes|shopping\s+list|grocery\s+list)\b',
+                r'\bupdate\s+(my\s+)?(note|notes|shopping\s+list|grocery\s+list)\b',
+                
+                # Find note patterns
+                r'\b(find|search\s+for|look\s+for)\s+(my\s+)?(note|notes)\b',
+                r'\b(find|search\s+for|look\s+for)\s+(.*)\s+(in|from)\s+(my\s+)?(note|notes)\b',
+                r'\b(show|list|display)\s+(my\s+)?(note|notes|all\s+notes)\b'
             ],
             'math': [
                 r'\b(calculate|compute|what\s+is|math|add|subtract|multiply|divide|plus|minus|times|divided\s+by)\b',
@@ -279,6 +310,10 @@ class NovaBrain:
                 # Redirect Notion queries to calendar skill
                 print("🔄 Redirecting Notion/task query to calendar skill")
                 return self._handle_calendar(user_input)
+            elif skill_name == 'notes':
+                # Handle notes requests
+                print("📝 Handling notes request")
+                return self._handle_notes(user_input)
             elif skill_name == 'math':
                 # COMMENTED OUT: Local math skills replaced with OpenAI LLM
                 # return self._handle_math(user_input)
@@ -479,6 +514,16 @@ class NovaBrain:
         
         calendar_skill = CalendarSkill()
         return calendar_skill.handle_query(user_input)
+        
+    def _handle_notes(self, user_input: str) -> str:
+        """Handle notes-related requests using the NotesSkill"""
+        if 'notes' in self.skill_instances:
+            return self.skill_instances['notes'].handle_query(user_input)
+        else:
+            # Fallback if skill instance not available
+            from core.skills.notes_skill import NotesSkill
+            notes_skill = NotesSkill()
+            return notes_skill.handle_query(user_input)
     
     # def _handle_notion(self, user_input: str) -> str:
     #     """Handle Notion-related requests (deprecated)"""
