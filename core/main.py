@@ -57,8 +57,12 @@ class HeyNova:
         # initialize time-based focus controller
         self.time_based_focus = TimeBasedFocusController()
         
-        # initialize spotify service
+        # initialize spotify services
         self.spotify = SpotifyService()
+        
+        # Import and initialize direct AppleScript control for Spotify
+        from core.services.spotify_applescript import SpotifyAppleScript
+        self.spotify_direct = SpotifyAppleScript()
         
         # Set default playlist for welcome greeting
         self.default_playlist = "Nightmode"
@@ -256,6 +260,54 @@ class HeyNova:
             # Check if we're in the afternoon/evening (after 12 PM)
             is_afternoon_or_evening = hour >= 12
             
+            # PREPARE EVERYTHING BEFORE SPEAKING
+            print("🚀 Preparing your welcome experience...")
+            
+            # 1. Set private mode first (always, regardless of time)
+            try:
+                self.time_based_focus.focus_controller.set_do_not_disturb(True)
+                print("🔒 Private mode activated")
+            except Exception:
+                print("⚠️ Could not set private mode")
+            
+            # 2. Prepare Spotify music (always, regardless of time)
+            music_status = "ready"
+            try:
+                playlist_name = self.default_playlist
+                print(f"🎵 Preparing {playlist_name} playlist...")
+                
+                # Use direct AppleScript approach for reliable playback
+                spotify_success = self.spotify_direct.ensure_ready_and_play_nightmode()
+                
+                if spotify_success:
+                    # Verify playback is actually working
+                    player_state = self.spotify_direct.get_player_state()
+                    if player_state == "playing":
+                        track_info = self.spotify_direct.get_current_track_info()
+                        if track_info:
+                            print(f"🎵 Now playing: {track_info['track']} by {track_info['artist']}")
+                        music_status = "playing"
+                    else:
+                        print(f"⚠️ Player state after play attempt: {player_state}")
+                        music_status = "not_ready"
+                else:
+                    print("❌ Failed to play Nightmode playlist")
+                    music_status = "error"
+                    
+            except Exception as e:
+                print(f"Spotify integration error: {e}")
+                music_status = "error"
+            
+            # 3. Get calendar information
+            calendar_info = ""
+            try:
+                calendar_service = CalendarService()
+                calendar_info = calendar_service.format_rest_of_day_schedule()
+                print("📅 Calendar information retrieved")
+            except Exception as e:
+                print(f"Error getting calendar info: {e}")
+            
+            # NOW BUILD THE GREETING MESSAGE IN THE CORRECT ORDER
             if 5 <= hour < 12:
                 greeting = "Good morning"
             elif 12 <= hour < 17:
@@ -263,59 +315,31 @@ class HeyNova:
             else:
                 greeting = "Good evening"
             
-            # Base welcome message in futuristic tone
+            # 1. Welcome home (greet)
             welcome_message = f"{greeting}, {config.user_title}! Welcome home."
             
-            # Add focus mode information for afternoon/evening hours (after 12 PM)
-            if is_afternoon_or_evening:
-                welcome_message += " I've set your home to private mode."
-                
-                # Ensure Do Not Disturb is enabled
-                try:
-                    self.time_based_focus.focus_controller.set_do_not_disturb(True)
-                except Exception:
-                    pass
+            # 2. Set home to private mode
+            welcome_message += " I've set your home to private mode."
             
-            # Add calendar information for the rest of the day
-            try:
-                calendar_service = CalendarService()
-                calendar_info = calendar_service.format_rest_of_day_schedule()
-                welcome_message += f" {calendar_info}"
-            except Exception as e:
-                print(f"Error getting calendar info: {e}")
+            # 3. Played music
+            if music_status == "playing":
+                welcome_message += f" I've started playing your {self.default_playlist} playlist on Spotify."
+            elif music_status == "ready":
+                welcome_message += " I'm ready to help you with music when you want."
+            elif music_status == "error":
+                welcome_message += " I'm ready to help you with music when you ask."
+            elif music_status == "no_device":
+                welcome_message += " I'm ready to help you with music when you ask."
+            elif music_status == "no_playlist":
+                welcome_message += " I couldn't find your default playlist, but I'm ready to play music when you ask."
+            elif music_status == "not_ready":
+                welcome_message += " I'm ready to help you with music when you want."
             
-            # Add productive day message
-            welcome_message += " Hope you have a productive day."
+            # 4. Schedule for remainder of day
+            welcome_message += f" {calendar_info}"
             
-            # Add Spotify music for afternoon/evening
-            if is_afternoon_or_evening:
-                try:
-                    # Try to start the default playlist
-                    playlist_name = self.default_playlist
-                    if self.spotify.is_available():
-                        # Check if playlist exists
-                        playlist = self.spotify.find_playlist_by_name(playlist_name)
-                        if playlist:
-                            # Check if we have an active device before trying to start
-                            devices = self.spotify.get_available_devices()
-                            if devices and any(device.get('is_active', False) for device in devices):
-                                welcome_message += f" I've started playing your {playlist_name} playlist on Spotify."
-                                # Start the playlist in background (don't wait for completion)
-                                try:
-                                    self.spotify.start_playlist(playlist_name)
-                                    print(f"🎵 Successfully started {playlist_name} playlist")
-                                except Exception as e:
-                                    print(f"Spotify playlist start error: {e}")
-                                    welcome_message += " I'm ready to help you with music when you ask."
-                            else:
-                                welcome_message += " I'm ready to help you with music when you ask."
-                        else:
-                            welcome_message += " I couldn't find your default playlist, but I'm ready to play music when you ask."
-                    else:
-                        welcome_message += " I'm ready to help you with music when you want."
-                except Exception as e:
-                    print(f"Spotify integration error: {e}")
-                    welcome_message += " I'm ready to help you with music when you want."
+            # 5. Finally: hope you have a productive xxx
+            welcome_message += f" Hope you have a productive {greeting.lower().replace('good ', '')}."
             
             print(f"🎭 {welcome_message}")
             self.tts.speak(welcome_message)
@@ -334,6 +358,541 @@ class HeyNova:
             # Update conversation state
             self.conversation_state["greeting_given"] = True
             self.conversation_state["active"] = True
+    
+    def _ensure_spotify_ready(self):
+        """Ensure Spotify is running and ready to play music
+        
+        Returns:
+            bool: True if Spotify is ready, False otherwise
+        """
+        try:
+            import subprocess
+            import time
+            
+            # Check if Spotify is already running and ready
+            if self.spotify.is_available():
+                try:
+                    # Quick test to see if Spotify responds
+                    devices = self.spotify.get_available_devices()
+                    if devices:
+                        print("🎵 Spotify is already running and ready")
+                        return True
+                except Exception:
+                    pass
+            
+            # Spotify is not ready, try to launch it
+            print("🎵 Launching Spotify...")
+            try:
+                # Launch Spotify using macOS open command
+                subprocess.run(['open', '-a', 'Spotify'], check=True, capture_output=True)
+                print("🎵 Spotify launch command sent")
+                
+                # Wait for Spotify to be ready with timeout
+                timeout_seconds = 15  # Reasonable timeout
+                wait_interval = 1  # Check every second
+                
+                print(f"⏳ Waiting up to {timeout_seconds} seconds for Spotify to be ready...")
+                
+                for attempt in range(timeout_seconds):
+                    time.sleep(wait_interval)
+                    
+                    try:
+                        # Test if Spotify is responding
+                        devices = self.spotify.get_available_devices()
+                        if devices:
+                            print(f"✅ Spotify is ready after {attempt + 1} seconds")
+                            return True
+                    except Exception as e:
+                        print(f"⏳ Spotify not ready yet (attempt {attempt + 1}/{timeout_seconds}): {e}")
+                        continue
+                
+                print(f"⏰ Spotify took too long to start (>{timeout_seconds}s), skipping music")
+                return False
+                
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Failed to launch Spotify: {e}")
+                return False
+            except Exception as e:
+                print(f"❌ Error launching Spotify: {e}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error in _ensure_spotify_ready: {e}")
+            return False
+    
+    def _get_spotify_status(self):
+        """Check Spotify's current status
+        
+        Returns:
+            str: "ready", "open_not_ready", "not_open", or "error"
+        """
+        try:
+            # First check if Spotify service is available
+            if not self.spotify.is_available():
+                return "not_open"
+            
+            # Try to get devices to see if Spotify is responding
+            try:
+                devices = self.spotify.get_available_devices()
+                if devices and len(devices) > 0:
+                    # Check if any device is active
+                    active_devices = [d for d in devices if d.get('is_active', False)]
+                    if active_devices:
+                        return "ready"
+                    else:
+                        return "open_not_ready"
+                else:
+                    return "open_not_ready"
+            except Exception:
+                return "open_not_ready"
+                
+        except Exception as e:
+            print(f"❌ Error checking Spotify status: {e}")
+            return "error"
+    
+    def _start_playlist_smart(self, playlist_name):
+        """Smart playlist starting with proper error handling
+        
+        Args:
+            playlist_name (str): Name of playlist to start
+            
+        Returns:
+            bool: True if playlist started successfully, False otherwise
+        """
+        try:
+            print(f"🔍 Looking for playlist: '{playlist_name}'")
+            playlist = self.spotify.find_playlist_by_name(playlist_name)
+            
+            if not playlist:
+                print(f"❌ Playlist '{playlist_name}' not found")
+                return False
+            
+            print(f"✅ Found playlist: {playlist.get('name', 'Unknown')} (ID: {playlist.get('id', 'Unknown')})")
+            
+            # Try to start the playlist
+            print(f"🎵 Starting playlist: {playlist_name}")
+            self.spotify.start_playlist(playlist_name)
+            print(f"🎵 Successfully started {playlist_name} playlist")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to start playlist: {e}")
+            return False
+            
+    def _play_spotify_with_state_machine(self, playlist_name, max_timeout=40):
+        """
+        Robust state machine for playing Spotify with proper state transitions.
+        
+        States:
+        1. AUTH_READY - Check if Spotify auth is valid
+        2. APP_READY - Check if Spotify app is running and responsive
+        3. DEVICE_READY - Ensure we have an active device
+        4. PLAYBACK_READY - Prepare playback settings
+        5. PLAYING - Successfully playing music
+        
+        Args:
+            playlist_name (str): Name of the playlist to play
+            max_timeout (int): Maximum total seconds to spend on the entire process
+            
+        Returns:
+            str: Status message ("playing", "error", etc.)
+        """
+        import time
+        import subprocess
+        
+        start_time = time.time()
+        
+        # STATE 1: AUTH_READY - Verify Spotify auth
+        print("🔑 Checking Spotify authentication...")
+        if not self.spotify.is_available():
+            print("❌ Spotify authentication not available")
+            return "auth_error"
+            
+        # STATE 2: APP_READY - Check if app is running
+        print("🔍 Checking if Spotify app is running...")
+        
+        # Check if Spotify is running using AppleScript
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", 'tell application "System Events" to (name of processes) contains "Spotify"'],
+                capture_output=True, text=True, check=True
+            )
+            app_running = result.stdout.strip().lower() == "true"
+            
+            if not app_running:
+                print("🚀 Launching Spotify...")
+                # Launch Spotify
+                subprocess.run(["open", "-a", "Spotify"], check=True)
+                print("✅ Spotify launch command sent")
+                
+                # Wait for app to start (up to 15 seconds)
+                app_ready = False
+                for attempt in range(15):
+                    if time.time() - start_time > max_timeout:
+                        print(f"⏰ Overall timeout reached ({max_timeout}s)")
+                        return "timeout"
+                        
+                    time.sleep(1)
+                    try:
+                        # Check if app is responding via API
+                        devices = self.spotify.get_available_devices()
+                        if devices:
+                            print(f"✅ Spotify app ready after {attempt + 1} seconds")
+                            app_ready = True
+                            break
+                    except Exception as e:
+                        print(f"⏳ Waiting for Spotify app... ({attempt + 1}s)")
+                
+                if not app_ready:
+                    # Try to prod the app by opening a URI
+                    print("🔄 Prodding Spotify app with URI...")
+                    subprocess.run(["open", "spotify:app"], check=True)
+                    
+                    # Wait another 10 seconds
+                    for attempt in range(10):
+                        if time.time() - start_time > max_timeout:
+                            print(f"⏰ Overall timeout reached ({max_timeout}s)")
+                            return "timeout"
+                            
+                        time.sleep(1)
+                        try:
+                            devices = self.spotify.get_available_devices()
+                            if devices:
+                                print(f"✅ Spotify app ready after prod ({attempt + 1}s)")
+                                app_ready = True
+                                break
+                        except Exception:
+                            print(f"⏳ Still waiting for Spotify... ({attempt + 1}s)")
+                    
+                    if not app_ready:
+                        print("❌ Spotify app failed to respond")
+                        return "app_not_ready"
+            else:
+                print("✅ Spotify app is already running")
+                app_ready = True
+        except Exception as e:
+            print(f"❌ Error checking Spotify app: {e}")
+            # Try to continue anyway
+            app_ready = True
+            
+        # STATE 3: DEVICE_READY - Ensure we have an active device
+        print("🎮 Checking for available Spotify devices...")
+        try:
+            devices = self.spotify.get_available_devices()
+            if not devices:
+                print("❌ No Spotify devices found")
+                return "no_devices"
+                
+            print(f"📱 Found {len(devices)} devices:")
+            for i, device in enumerate(devices):
+                print(f"   Device {i+1}: {device.get('name', 'Unknown')} - Active: {device.get('is_active', False)} - Type: {device.get('type', 'Unknown')}")
+            
+            # Find the best device to use (prefer Computer type)
+            target_device = None
+            
+            # First, look for an already active device
+            active_devices = [d for d in devices if d.get('is_active', False)]
+            if active_devices:
+                target_device = active_devices[0]
+                print(f"✅ Using already active device: {target_device.get('name')}")
+            else:
+                # Next, prefer Computer type devices (likely this machine)
+                computer_devices = [d for d in devices if d.get('type') == 'Computer']
+                if computer_devices:
+                    target_device = computer_devices[0]
+                    print(f"✅ Using computer device: {target_device.get('name')}")
+                else:
+                    # Fall back to first available device
+                    target_device = devices[0]
+                    print(f"✅ Using available device: {target_device.get('name')}")
+            
+            # If device is not active, activate it
+            if not target_device.get('is_active', False):
+                print(f"🔧 Activating device: {target_device.get('name')}")
+                device_id = target_device.get('id')
+                
+                # Retry up to 4 times with backoff
+                backoff_times = [0.25, 0.5, 1, 2]
+                activated = False
+                
+                for attempt, backoff in enumerate(backoff_times):
+                    if time.time() - start_time > max_timeout:
+                        print(f"⏰ Overall timeout reached ({max_timeout}s)")
+                        return "timeout"
+                        
+                    try:
+                        # Transfer playback to this device
+                        self.spotify._make_request('PUT', 'https://api.spotify.com/v1/me/player', 
+                                                  data={'device_ids': [device_id], 'play': False})
+                        print(f"✅ Device activated on attempt {attempt + 1}")
+                        activated = True
+                        break
+                    except Exception as e:
+                        print(f"⚠️ Activation attempt {attempt + 1} failed: {e}")
+                        time.sleep(backoff)
+                
+                if not activated:
+                    print("⚠️ Failed to activate device via API, trying AppleScript fallback...")
+                    try:
+                        # Fallback: Try to activate Spotify via AppleScript
+                        import subprocess
+                        subprocess.run(["osascript", "-e", 'tell application "Spotify" to activate'], check=True)
+                        print("✅ Spotify activated via AppleScript")
+                        
+                        # Wait a moment for Spotify to become active
+                        time.sleep(2)
+                        
+                        # Try a direct AppleScript command to play
+                        try:
+                            subprocess.run(["osascript", "-e", 'tell application "Spotify" to play'], check=True)
+                            print("✅ Spotify play command sent via AppleScript")
+                            activated = True
+                        except Exception as e:
+                            print(f"⚠️ AppleScript play failed: {e}")
+                    except Exception as e:
+                        print(f"❌ AppleScript activation failed: {e}")
+                        # Continue anyway
+            
+            # Prime the device with a play/pause action to ensure it's fully ready
+            print("🔌 Priming device for playback...")
+            primed = self._prime_spotify_device()
+            if primed:
+                print("✅ Device successfully primed")
+            else:
+                print("⚠️ Device priming failed, but continuing anyway")
+            
+            # STATE 4: PLAYBACK_READY - Prepare playback settings
+            print(f"🎵 Preparing to play playlist: {playlist_name}")
+            
+            # Find the playlist
+            playlist = self.spotify.find_playlist_by_name(playlist_name)
+            if not playlist:
+                print(f"❌ Playlist '{playlist_name}' not found")
+                return "playlist_not_found"
+            
+            print(f"✅ Found playlist: {playlist.get('name')} (ID: {playlist.get('id')})")
+            
+            # Configure player settings (optional)
+            try:
+                # Set shuffle off
+                self.spotify._make_request('PUT', 'https://api.spotify.com/v1/me/player/shuffle?state=false')
+                print("✅ Shuffle turned off")
+            except Exception as e:
+                print(f"⚠️ Could not set shuffle: {e}")
+            
+            # STATE 5: PLAYING - Start playback
+            print("▶️ Starting playlist...")
+            
+            # Try up to 2 times to start playback
+            for attempt in range(2):
+                if time.time() - start_time > max_timeout:
+                    print(f"⏰ Overall timeout reached ({max_timeout}s)")
+                    return "timeout"
+                    
+                try:
+                    # Start the playlist via API
+                    try:
+                        self.spotify.start_playlist(playlist_name)
+                        print("✅ Start playlist API call successful")
+                    except Exception as e:
+                        print(f"⚠️ API playlist start failed: {e}")
+                        
+                        # Try AppleScript fallback if API fails
+                        if attempt == 1:  # Only try AppleScript on second attempt
+                            print("🔄 Trying AppleScript fallback to start playlist...")
+                            try:
+                                # First activate Spotify
+                                import subprocess
+                                subprocess.run(["osascript", "-e", 'tell application "Spotify" to activate'], check=True)
+                                
+                                # Get the playlist URI if available
+                                playlist_uri = None
+                                if playlist and playlist.get('uri'):
+                                    playlist_uri = playlist.get('uri')
+                                    print(f"✅ Found playlist URI: {playlist_uri}")
+                                
+                                # Try to play the playlist directly if we have the URI
+                                if playlist_uri:
+                                    try:
+                                        play_uri_cmd = f'tell application "Spotify" to play track "{playlist_uri}"'
+                                        subprocess.run(["osascript", "-e", play_uri_cmd], check=True)
+                                        print("✅ AppleScript play URI command sent")
+                                    except Exception as e:
+                                        print(f"⚠️ AppleScript URI play failed: {e}")
+                                        # Try generic play as fallback
+                                        play_cmd = 'tell application "Spotify" to play'
+                                        subprocess.run(["osascript", "-e", play_cmd], check=True)
+                                        print("✅ AppleScript generic play command sent")
+                                else:
+                                    # Just try to play whatever is loaded
+                                    play_cmd = 'tell application "Spotify" to play'
+                                    subprocess.run(["osascript", "-e", play_cmd], check=True)
+                                    print("✅ AppleScript generic play command sent")
+                            except Exception as e:
+                                print(f"❌ AppleScript fallback failed: {e}")
+                                # Continue to verification anyway
+                    
+                    # Verify playback started
+                    print("🔍 Verifying playback...")
+                    playback_verified = False
+                    
+                    # Poll player state up to 10 times
+                    for verify_attempt in range(10):
+                        if time.time() - start_time > max_timeout:
+                            print(f"⏰ Overall timeout reached ({max_timeout}s)")
+                            return "timeout"
+                            
+                        time.sleep(1)
+                        try:
+                            # Check current playback via API
+                            try:
+                                player_state = self.spotify._make_request('GET', 'https://api.spotify.com/v1/me/player')
+                                
+                                # Check if playing
+                                if player_state and player_state.get('is_playing'):
+                                    print(f"✅ Playback verified after {verify_attempt + 1}s")
+                                    playback_verified = True
+                                    break
+                            except Exception:
+                                # Try AppleScript verification as fallback
+                                try:
+                                    import subprocess
+                                    result = subprocess.run(
+                                        ["osascript", "-e", 'tell application "Spotify" to player state as string'],
+                                        capture_output=True, text=True, check=True
+                                    )
+                                    if "playing" in result.stdout.lower():
+                                        print(f"✅ Playback verified via AppleScript after {verify_attempt + 1}s")
+                                        playback_verified = True
+                                        break
+                                except Exception:
+                                    pass
+                        except Exception as e:
+                            print(f"⏳ Waiting for playback confirmation... ({verify_attempt + 1}s)")
+                    
+                    if playback_verified:
+                        print(f"🎵 Successfully playing {playlist_name} playlist")
+                        return "playing"
+                    else:
+                        print("⚠️ Playback not confirmed, retrying...")
+                        
+                except Exception as e:
+                    print(f"❌ Playback attempt {attempt + 1} failed: {e}")
+                    time.sleep(1)
+            
+            print("❌ Failed to start playback after multiple attempts")
+            return "playback_failed"
+            
+        except Exception as e:
+            print(f"❌ Device error: {e}")
+            return "device_error"
+            
+        # If we reach here, something went wrong
+        print("❌ Unknown error in Spotify state machine")
+        return "unknown_error"
+    
+    def _prime_spotify_device(self):
+        """Prime the Spotify device by playing and pausing a track
+        
+        This helps ensure the device is fully activated and ready for playback.
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Try API approach first
+            try:
+                print("🎯 Priming device via API...")
+                
+                # 1. Play something (doesn't matter what)
+                self.spotify._make_request('PUT', 'https://api.spotify.com/v1/me/player/play')
+                print("✅ Play command sent")
+                time.sleep(1)
+                
+                # 2. Then pause it
+                self.spotify._make_request('PUT', 'https://api.spotify.com/v1/me/player/pause')
+                print("✅ Pause command sent")
+                
+                return True
+            except Exception as e:
+                print(f"⚠️ API priming failed: {e}")
+                
+                # Try AppleScript fallback
+                print("🎯 Trying AppleScript fallback...")
+                try:
+                    import subprocess
+                    
+                    # 1. Activate Spotify
+                    subprocess.run(["osascript", "-e", 'tell application "Spotify" to activate'], check=True)
+                    
+                    # 2. Play
+                    subprocess.run(["osascript", "-e", 'tell application "Spotify" to play'], check=True)
+                    print("✅ Play command sent via AppleScript")
+                    time.sleep(1)
+                    
+                    # 3. Pause
+                    subprocess.run(["osascript", "-e", 'tell application "Spotify" to pause'], check=True)
+                    print("✅ Pause command sent via AppleScript")
+                    
+                    return True
+                except Exception as e:
+                    print(f"❌ AppleScript priming failed: {e}")
+                    return False
+        except Exception as e:
+            print(f"❌ Device priming error: {e}")
+            return False
+    
+    def _wait_for_spotify_ready(self, timeout_seconds=10):
+        """Wait for Spotify to become ready
+        
+        Args:
+            timeout_seconds (int): Maximum time to wait
+            
+        Returns:
+            bool: True if Spotify becomes ready, False if timeout
+        """
+        print(f"⏳ Waiting up to {timeout_seconds} seconds for Spotify to be ready...")
+        
+        for attempt in range(timeout_seconds):
+            time.sleep(1)
+            
+            try:
+                devices = self.spotify.get_available_devices()
+                if devices and any(d.get('is_active', False) for d in devices):
+                    print(f"✅ Spotify is ready after {attempt + 1} seconds")
+                    return True
+            except Exception as e:
+                print(f"⏳ Spotify not ready yet (attempt {attempt + 1}/{timeout_seconds}): {e}")
+                continue
+        
+        print(f"⏰ Spotify took too long to be ready (>{timeout_seconds}s)")
+        return False
+    
+    def _launch_and_wait_for_spotify(self, timeout_seconds=15):
+        """Launch Spotify and wait for it to be ready
+        
+        Args:
+            timeout_seconds (int): Maximum time to wait after launch
+            
+        Returns:
+            bool: True if Spotify launches and becomes ready, False otherwise
+        """
+        try:
+            import subprocess
+            
+            print("🎵 Launching Spotify...")
+            subprocess.run(['open', '-a', 'Spotify'], check=True, capture_output=True)
+            print("🎵 Spotify launch command sent")
+            
+            # Wait for Spotify to be ready
+            return self._wait_for_spotify_ready(timeout_seconds)
+            
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Failed to launch Spotify: {e}")
+            return False
+        except Exception as e:
+            print(f"❌ Error launching Spotify: {e}")
+            return False
     
     def _show_voice_health_hud(self):
         """Display Voice Health HUD with current metrics"""

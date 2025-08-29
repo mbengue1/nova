@@ -34,8 +34,16 @@ def debug_auth():
     print("\n🔍 Debugging Google Calendar authentication...\n")
     
     # Use the credentials file directly
-    credentials_path = '/Users/mouhamed23/nova/credentials/client_secret_221815731458-i77ukrlr42sv288unme7kvr4hnkonpdc.apps.googleusercontent.com.json'
-    token_path = '/Users/mouhamed23/nova/credentials/google_token.pickle'
+    # Look for any client_secret file in the credentials directory
+    credentials_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'credentials')
+    client_secret_files = [f for f in os.listdir(credentials_dir) if f.startswith('client_secret') and f.endswith('.json')]
+    if not client_secret_files:
+        print("❌ No client_secret*.json file found in credentials directory")
+        return False
+    
+    credentials_path = os.path.join(credentials_dir, client_secret_files[0])
+    print(f"✅ Using credentials file: {credentials_path}")
+    token_path = os.path.join(credentials_dir, 'google_token.pickle')
     
     # Check if credentials file exists
     if not os.path.exists(credentials_path):

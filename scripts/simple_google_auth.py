@@ -37,7 +37,14 @@ def simple_auth():
     
     # Paths for credentials and token
     credentials_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'credentials')
-    credentials_file = os.path.join(credentials_dir, 'client_secret_221815731458-i77ukrlr42sv288unme7kvr4hnkonpdc.apps.googleusercontent.com.json')
+    # Look for any client_secret file in the credentials directory
+    client_secret_files = [f for f in os.listdir(credentials_dir) if f.startswith('client_secret') and f.endswith('.json')]
+    if not client_secret_files:
+        print("❌ No client_secret*.json file found in credentials directory")
+        return False
+    
+    credentials_file = os.path.join(credentials_dir, client_secret_files[0])
+    print(f"✅ Using credentials file: {credentials_file}")
     token_file = os.path.join(credentials_dir, 'google_token.pickle')
     
     # Check if credentials file exists
