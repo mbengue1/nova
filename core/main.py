@@ -136,16 +136,13 @@ class HeyNova:
         except Exception as e:
             print(f"⚠️ Audio cleanup failed: {e}")
         
-        # Start in conversation mode immediately
-        print("\n🔊 Nova is ready and listening...")
+        # Nova is now in background mode - waiting for wake word
+        print("\n🌙 Nova is in background mode - say 'Hey Nova' to activate")
         print("   (Press Ctrl+C to exit)")
         
-        # Process first input directly without wake word
-        self._process_user_input(use_streaming=True, first_interaction=True)
-        
-        # main system loop - after first interaction, system will be in wake word mode
+        # main system loop - Nova stays in background mode until wake word
         try:
-            print("\n🔊 Nova is now in wake word mode - say 'Hey Nova' to activate")
+            print("\n🔔 Wake word detection active - say 'Hey Nova' when you need me")
             print("   (Press Ctrl+C to exit)")
             
             # Track time for periodic cleanup
@@ -177,16 +174,16 @@ class HeyNova:
     def _on_wake_word(self):
         """Called when wake word is detected"""
         print("\n🔔 Wake word detected!")
-        print("💬 Entering conversation mode...")
-        self.current_mode = "conversation"
-        self._process_user_input()
+        print("💬 Processing single request...")
+        self.current_mode = "active"
+        self._process_single_request()
     
     def _on_push_to_talk(self):
         """Called when push-to-talk is activated"""
         print("\n🎤 Push-to-talk activated!")
-        print("💬 Entering conversation mode...")
-        self.current_mode = "conversation"
-        self._process_user_input()
+        print("💬 Processing single request...")
+        self.current_mode = "active"
+        self._process_single_request()
     
     def _interrupt_speech(self):
         """Called when user starts speaking (interrupts current speech)"""
@@ -238,12 +235,12 @@ class HeyNova:
                     self._speak_with_fallback("Sorry, could you try again?", allow_interruption=True)
                     print("🎤 Continuing with standard listening due to error...")
                     self.stt.reset_state()
-                    self._process_user_input(use_streaming=True)
+                    self._process_single_request()
             else:
                 print("⚠️ No interruption audio captured, continuing with standard listening")
                 # Continue with standard listening
                 self.stt.reset_state()
-                self._process_user_input(use_streaming=True)
+                self._process_single_request()
     
     def _welcome_greeting(self):
         """Give personalized welcome greeting"""
@@ -347,6 +344,10 @@ class HeyNova:
             # Update conversation state
             self.conversation_state["greeting_given"] = True
             self.conversation_state["active"] = True
+            
+            # After greeting completes, switch to background mode
+            print("🔄 Switching to background mode...")
+            self._switch_to_background_mode()
             
         except Exception as e:
             print(f"Error in welcome greeting: {e}")
@@ -932,6 +933,81 @@ class HeyNova:
         except Exception as e:
             logger.log("hud_error", {"error": str(e)}, "ERROR")
     
+    def _process_single_request(self):
+        """Process a single user request and return to background mode
+        
+        This implements the Home Starter Mode flow:
+        1. Listen for one request
+        2. Process the request
+        3. Give brief response
+        4. Return to background mode
+        """
+        try:
+            print("🎤 Listening for your request...")
+            
+            # Get speech input from user
+            user_input = None
+            try:
+                user_input = self.stt.record_audio_with_vad()
+            except Exception as stt_error:
+                logger.log("stt_error", {"error": str(stt_error), "method": "vad"}, "ERROR")
+                print(f"⚠️  VAD recording failed: {stt_error}")
+                print("🔄 Falling back to fixed duration recording...")
+                
+                try:
+                    user_input = self.stt.record_audio_fixed()
+                except Exception as fixed_error:
+                    logger.log("stt_error", {"error": str(fixed_error), "method": "fixed"}, "ERROR")
+                    print(f"⚠️  Fixed recording failed: {fixed_error}")
+            
+            if not user_input:
+                print("⚠️  No speech detected")
+                self.tts.speak("I didn't catch that. Say 'Hey Nova' when you need me.")
+                self._return_to_background_mode()
+                return
+            
+            print(f"👤 You said: '{user_input}'")
+            
+            # Process request with brain
+            print("🧠 Processing your request...")
+            
+            try:
+                # Get response (non-streaming for single requests)
+                response = self.brain.process_input(user_input)
+                
+                if response:
+                    print(f"🤖 Nova: {response}")
+                    
+                    # Speak response to user
+                    if not self._speak_with_fallback(response):
+                        print("⚠️  TTS failed")
+                else:
+                    print("⚠️  No response generated")
+                    self._speak_with_fallback("I'm sorry, I couldn't process that request.")
+                    return
+                    
+            except Exception as brain_error:
+                logger.log("brain_error", {"error": str(brain_error)}, "ERROR")
+                print(f"⚠️  Brain processing failed: {brain_error}")
+                self._speak_with_fallback("I'm having trouble processing that. Say 'Hey Nova' to try again.")
+            
+            # Reset STT state
+            try:
+                self.stt.reset_state()
+            except Exception as reset_error:
+                logger.log("reset_error", {"error": str(reset_error)}, "ERROR")
+                print(f"⚠️  STT reset failed: {reset_error}")
+            
+            # Return to background mode
+            print("🔄 Returning to background mode...")
+            self._return_to_background_mode()
+                
+        except Exception as e:
+            logger.log("process_error", {"error": str(e)}, "ERROR")
+            print(f"Error processing user input: {e}")
+            self._speak_with_fallback("I encountered an error. Say 'Hey Nova' to try again.")
+            self._return_to_background_mode()
+    
     def _process_user_input(self, use_streaming: bool = True, first_interaction: bool = False):
         """Process user input through the full pipeline
         
@@ -1362,26 +1438,73 @@ class HeyNova:
                 else:
                     print("⚠️ TTS failed for interruption response")
             
-            # After speaking, continue conversation mode
-            self._enter_conversation_mode(use_streaming=True)
+            # After speaking, return to background mode
+            self._return_to_background_mode()
             
         except Exception as e:
             print(f"❌ Error processing interruption: {e}")
             self._speak_with_fallback("I'm sorry, I couldn't process that properly. What else can I help with?", allow_interruption=True)
-            # Continue conversation mode
-            self._enter_conversation_mode(use_streaming=True)
+            # Return to background mode
+            self._return_to_background_mode()
     
-    def _return_to_wake_word_mode(self, message: str = "I'll be listening for 'Hey Nova' when you need me again."):
-        """Return to wake word detection mode with a message
+    def _switch_to_background_mode(self):
+        """Switch Nova to silent background mode after greeting
+        
+        This mode:
+        - Stops continuous VAD listening
+        - Only enables wake word detection
+        - Minimizes resource usage
+        - Nova goes silent until wake word is detected
+        """
+        print("🌙 Switching to background mode...")
+        
+        # Set mode to background (wake word only)
+        self.current_mode = "background"
+        
+        # Update conversation state
+        self.conversation_state.update({
+            "active": False,
+            "last_input": None,
+            "last_response": None,
+            "interruption_count": 0,
+            "last_interruption": None
+        })
+        
+        # Stop any active speech
+        try:
+            if self.tts.is_currently_speaking():
+                self.tts.stop_speaking()
+        except Exception as e:
+            print(f"⚠️  Error stopping speech: {e}")
+        
+        # Ensure wake word detection is active
+        try:
+            if hasattr(self.wake_detector, 'is_listening') and not self.wake_detector.is_listening:
+                self.wake_detector.start_listening()
+            print("🔔 Wake word detection active - say 'Hey Nova' when you need me")
+        except Exception as e:
+            print(f"⚠️  Error activating wake word detection: {e}")
+        
+        # Stop any active STT/VAD processes
+        try:
+            if hasattr(self.stt, 'stop_listening'):
+                self.stt.stop_listening()
+        except Exception as e:
+            print(f"⚠️  Error stopping STT: {e}")
+        
+        print("✅ Nova is now in background mode - silent and waiting for 'Hey Nova'")
+    
+    def _return_to_background_mode(self, message: str = "I'll be listening for 'Hey Nova' when you need me again."):
+        """Return to background mode after processing a request
         
         Args:
-            message: The message to speak before returning to wake word mode
+            message: The message to speak before returning to background mode
         """
         # Speak the transition message
         self._speak_with_fallback(message)
         
-        # Set mode to wake word
-        self.current_mode = "wake_word"
+        # Set mode to background
+        self.current_mode = "background"
         
         # Reset conversation state
         self.conversation_state.update({
@@ -1399,6 +1522,8 @@ class HeyNova:
             print("🔔 Wake word detection active - say 'Hey Nova' when you need me")
         except Exception as e:
             print(f"⚠️  Error activating wake word detection: {e}")
+        
+        print("✅ Nova is now in background mode - silent and waiting for 'Hey Nova'")
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""
