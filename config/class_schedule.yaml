@@ -1,0 +1,103 @@
+# Nova Class Schedule Configuration
+# Nova will stay silent during these hours to respect your academic schedule
+
+# Buffer time (minutes before/after class when Nova should be quiet)
+buffer_minutes: 15
+
+# Class schedule by day of week
+# Monday = 0, Tuesday = 1, Wednesday = 2, Thursday = 3, Friday = 4
+# Times in 24-hour format (HH:MM)
+class_schedule:
+  # Monday - Film History + Computer Organization
+  0: # Monday
+    - name: "Film History (AHST 254-1)"
+      start: "13:45" # 1:45 PM (15 min before 2:00 PM)
+      end: "16:55" # 4:55 PM (15 min after 4:40 PM)
+      location: "Morey Room 504"
+      instructor: "Sharon Willis"
+      courses: ["Film History", "AHST 254-1"]
+
+  # Tuesday - History of Islam + Data Mining + After the Quake
+  1: # Tuesday
+    - name: "History of Islam (RELC 107)"
+      start: "10:50" # 10:50 AM (15 min before 11:05 AM)
+      end: "12:35" # 12:35 PM (15 min after 12:20 PM)
+      location: "Lattimore Room 210"
+      instructor: "Mehmet Karabela"
+      courses: ["History of Islam", "RELC 107"]
+    - name: "Intro to Data Mining (CSC 240-1)"
+      start: "15:10" # 3:10 PM (15 min before 3:25 PM)
+      end: "19:45" # 7:45 PM (15 min after 7:30 PM)
+      location: "Gavett Hall Room 206"
+      instructor: "Cantay Caliskan"
+      courses: ["Intro to Data Mining", "CSC 240-1"]
+    - name: "After the Quake (FMST 210-1)"
+      start: "18:00" # 6:00 PM (15 min before 6:15 PM)
+      end: "19:45" # 7:45 PM (15 min after 7:30 PM)
+      location: "Frederick Douglass Room 420"
+      instructor: "Lin Meng Walsh"
+      courses: ["After the Quake", "FMST 210-1"]
+
+  # Wednesday - Film History + Computer Organization
+  2: # Wednesday
+    - name: "Film History (AHST 254-1)"
+      start: "13:45" # 1:45 PM (15 min before 2:00 PM)
+      end: "16:55" # 4:55 PM (15 min after 4:40 PM)
+      location: "Morey Room 504"
+      instructor: "Sharon Willis"
+      courses: ["Film History", "AHST 254-1"]
+    - name: "Computer Organization (CSC 252-1)"
+      start: "15:10" # 3:10 PM (15 min before 3:25 PM)
+      end: "16:55" # 4:55 PM (15 min after 4:40 PM)
+      location: "Wegmans Room 1400"
+      instructor: "Yanan Guo"
+      courses: ["Computer Organization", "CSC 252-1"]
+
+  # Thursday - History of Islam + Data Mining + After the Quake
+  3: # Thursday
+    - name: "History of Islam (RELC 107)"
+      start: "10:50" # 10:50 AM (15 min before 11:05 AM)
+      end: "12:35" # 12:35 PM (15 min after 12:20 PM)
+      location: "Lattimore Room 210"
+      instructor: "Mehmet Karabela"
+      courses: ["History of Islam", "RELC 107"]
+    - name: "Intro to Data Mining (CSC 240-1)"
+      start: "15:10" # 3:10 PM (15 min before 3:25 PM)
+      end: "19:45" # 7:45 PM (15 min after 7:30 PM)
+      location: "Gavett Hall Room 206"
+      instructor: "Cantay Caliskan"
+      courses: ["Intro to Data Mining", "CSC 240-1"]
+    - name: "After the Quake (FMST 210-1)"
+      start: "18:00" # 6:00 PM (15 min before 6:15 PM)
+      end: "19:45" # 7:45 PM (15 min after 7:30 PM)
+      location: "Frederick Douglass Room 420"
+      instructor: "Lin Meng Walsh"
+      courses: ["After the Quake", "FMST 210-1"]
+
+  # Friday - No classes (Nova available all day)
+  4: [] # Friday
+
+  # Weekend - Nova always available
+  5: [] # Saturday
+  6: [] # Sunday
+
+# General university hours (additional protection)
+university_hours:
+  enabled: true
+  weekdays: [0, 1, 2, 3, 4] # Monday-Friday
+  start_time: "08:00" # 8:00 AM
+  end_time: "22:00" # 10:00 PM
+
+# Nova behavior settings
+nova_behavior:
+  # Should Nova check class schedule before greeting?
+  respect_class_schedule: true
+
+  # Should Nova check general university hours?
+  respect_university_hours: true
+
+  # Allow manual override during class time?
+  allow_manual_override: false
+
+  # Log when Nova is silent due to scheduling
+  log_silent_periods: true

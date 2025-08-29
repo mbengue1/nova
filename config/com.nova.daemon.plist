@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+    <dict>
+        <key>Label</key>
+        <string>com.nova.daemon</string>
+
+        <key>ProgramArguments</key>
+        <array>
+            <string>/usr/bin/python3</string>
+            <string>/Users/mouhamed23/nova/daemon/novad.py</string>
+        </array>
+
+        <key>RunAtLoad</key>
+        <true/>
+
+        <key>KeepAlive</key>
+        <true/>
+
+        <key>StandardOutPath</key>
+        <string>/tmp/nova_daemon.out</string>
+
+        <key>StandardErrorPath</key>
+        <string>/tmp/nova_daemon.err</string>
+
+        <key>WorkingDirectory</key>
+        <string>/Users/mouhamed23/nova</string>
+
+        <key>EnvironmentVariables</key>
+        <dict>
+            <key>PATH</key>
+            <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+            <key>PYTHONPATH</key>
+            <string>/Users/mouhamed23/nova</string>
+        </dict>
+
+        <key>ProcessType</key>
+        <string>Background</string>
+
+        <key>ThrottleInterval</key>
+        <integer>10</integer>
+
+        <key>ExitTimeOut</key>
+        <integer>30</integer>
+    </dict>
+</plist>
